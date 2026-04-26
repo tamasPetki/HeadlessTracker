@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.7.1-burn-in. 3 connectors (Bybit, MetaMask multi-chain, Polymarket), 6 MCP tools, 110-test suite. Working end-to-end with Claude Desktop.
+**Status:** v0.7.1-burn-in. 3 connectors (Bybit, MetaMask multi-chain, Polymarket), 6 MCP tools, 110-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
