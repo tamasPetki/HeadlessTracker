@@ -25,6 +25,9 @@ export interface OrchestratorOptions {
   accountStore?: AccountStore;
   vault?: Vault;
   cache?: Cache;
+  // Pre-populated connector instances. Bypasses the lazy factory.
+  // Used by tests to inject stubs without mocking the module.
+  connectorOverrides?: Partial<Record<ConnectorId, Connector>>;
 }
 
 interface FetchOptions {
@@ -51,6 +54,11 @@ export class Orchestrator {
     this.accountStore = opts.accountStore ?? defaultAccountStore();
     this.vault = opts.vault ?? defaultVault();
     this.cache = opts.cache ?? defaultCache();
+    if (opts.connectorOverrides) {
+      for (const [id, conn] of Object.entries(opts.connectorOverrides)) {
+        if (conn) this.connectors.set(id as ConnectorId, conn);
+      }
+    }
   }
 
   private getConnector(id: ConnectorId): Connector {

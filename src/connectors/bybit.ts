@@ -44,7 +44,8 @@ function clientFor(creds: BybitCreds): RestClientV5 {
 
 // Bybit V5 returns retCode 0 on success, non-zero on logical errors.
 // Map common retCodes to our ConnectorError kinds. Unknown codes → upstream_error.
-function mapBybitError(retCode: number, retMsg: string): { kind: Parameters<typeof err>[0]; message: string } {
+// Exported for unit-testability — the SDK call path is hard to mock cleanly.
+export function mapBybitError(retCode: number, retMsg: string): { kind: Parameters<typeof err>[0]; message: string } {
   // 10003: api key invalid, 10004: bad sign, 10005: permission denied
   if ([10003, 10004, 10005, 33004, 110001].includes(retCode)) {
     return { kind: "auth_failed", message: `Bybit auth failed (${retCode}): ${retMsg}` };

@@ -145,7 +145,8 @@ async function etherscanCall<T>(
   return ok(json.result as T);
 }
 
-function applyDecimals(raw: string, decimals: number): number {
+// Exported for unit-testability — converts wei-style integer strings to decimal numbers.
+export function applyDecimals(raw: string, decimals: number): number {
   // BigInt division to avoid Number precision loss for 18-decimal values.
   // Then convert to Number for the public Holding type. Acceptable lossy at the
   // output boundary; internal arithmetic stays in BigInt.
