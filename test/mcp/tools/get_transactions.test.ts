@@ -138,7 +138,7 @@ describe("executeGetTransactions", () => {
     const orch = new Orchestrator({ accountStore, cache, vault: vault as never });
     const result = await executeGetTransactions({}, orch);
     expect(result.meta.coverage.polymarket).toBe("not_implemented_in_v0");
-    expect(result.meta.coverage.metamask).toBe("native_transfers_only_v0");
+    expect(result.meta.coverage.metamask).toBe("native_and_erc20_transfers");
     expect(result.meta.coverage.bybit).toBe("full");
   });
 });

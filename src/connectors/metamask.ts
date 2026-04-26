@@ -441,6 +441,7 @@ export class MetaMaskConnector implements Connector {
     const creds = ctx.credentials as MetaMaskCreds;
     const chainInfo = SUPPORTED_CHAINS[chainId];
     const txs: Transaction[] = [];
+    const myAddr = creds.address.toLowerCase();
 
     interface NormalTx {
       blockNumber: string;
@@ -454,24 +455,61 @@ export class MetaMaskConnector implements Connector {
       isError: string;
     }
 
-    const normalRes = await etherscanCall<NormalTx[]>(
-      {
-        chainid: String(chainId),
-        module: "account",
-        action: "txlist",
-        address: creds.address,
-        startblock: String(startBlock),
-        endblock: "latest",
-        page: "1",
-        offset: "50",
-        sort: "desc",
-        apikey: creds.etherscanApiKey,
-      },
-      ctx.signal
-    );
+    interface TokenTx {
+      blockNumber: string;
+      timeStamp: string;
+      hash: string;
+      from: string;
+      to: string;
+      value: string;             // raw, needs tokenDecimal
+      contractAddress: string;
+      tokenName: string;
+      tokenSymbol: string;
+      tokenDecimal: string;
+      gasUsed: string;
+      gasPrice: string;
+    }
+
+    // Fan out native + ERC-20 transfer fetches in parallel. Etherscan free tier
+    // is 5 calls/sec, two simultaneous calls per chain stays well under that.
+    const [normalRes, tokenRes] = await Promise.all([
+      etherscanCall<NormalTx[]>(
+        {
+          chainid: String(chainId),
+          module: "account",
+          action: "txlist",
+          address: creds.address,
+          startblock: String(startBlock),
+          endblock: "latest",
+          page: "1",
+          offset: "50",
+          sort: "desc",
+          apikey: creds.etherscanApiKey,
+        },
+        ctx.signal
+      ),
+      etherscanCall<TokenTx[]>(
+        {
+          chainid: String(chainId),
+          module: "account",
+          action: "tokentx",
+          address: creds.address,
+          startblock: String(startBlock),
+          endblock: "latest",
+          page: "1",
+          offset: "50",
+          sort: "desc",
+          apikey: creds.etherscanApiKey,
+        },
+        ctx.signal
+      ),
+    ]);
+
+    // If the native call hard-failed (auth, free-tier-blocked, etc.) the chain is
+    // unusable — bubble that up. Token transfer call failure on its own is softer:
+    // we still return whatever native transfers we got.
     if (!normalRes.ok) return normalRes;
 
-    const myAddr = creds.address.toLowerCase();
     for (const tx of normalRes.value) {
       const isOutbound = tx.from.toLowerCase() === myAddr;
       const valueNative = applyDecimals(tx.value, chainInfo.nativeDecimals);
@@ -496,9 +534,55 @@ export class MetaMaskConnector implements Connector {
           to: tx.to,
           blockNumber: tx.blockNumber,
           isError: tx.isError === "1",
+          asset: "native",
         },
       });
     }
+
+    if (tokenRes.ok) {
+      for (const tx of tokenRes.value) {
+        const isOutbound = tx.from.toLowerCase() === myAddr;
+        const decimals = parseInt(tx.tokenDecimal, 10);
+        // Defensive: malformed tokenDecimal shows up as NaN — skip rather than emit garbage.
+        if (!Number.isFinite(decimals) || decimals < 0 || decimals > 36) continue;
+        const qty = applyDecimals(tx.value, decimals);
+        // Fee is paid in native, only by the sender. Etherscan returns the same
+        // fee fields on both legs (in/out) of a token transfer because they describe
+        // the underlying tx — but we only attribute it to the outbound leg.
+        const feeNative = isOutbound
+          ? applyDecimals(tx.gasUsed, 0) * applyDecimals(tx.gasPrice, chainInfo.nativeDecimals)
+          : 0;
+
+        txs.push({
+          accountId: ctx.account.id,
+          // Disambiguate from native: txhash alone is not unique when an account both
+          // sends native AND triggers a token transfer in the same tx (rare but real,
+          // e.g. permit + transfer). Suffix with the contract address keeps txId unique.
+          txId: `${chainId}:${tx.hash}:${tx.contractAddress.toLowerCase()}`,
+          type: isOutbound ? "withdraw" : "deposit",
+          symbol: tx.tokenSymbol,
+          quantity: qty,
+          fee: feeNative,
+          feeCurrency: chainInfo.nativeSymbol,
+          valueCurrency: "USD",
+          timestamp: parseInt(tx.timeStamp, 10) * 1000,
+          metadata: {
+            chainId,
+            chainName: chainInfo.name,
+            hash: tx.hash,
+            from: tx.from,
+            to: tx.to,
+            blockNumber: tx.blockNumber,
+            asset: "erc20",
+            contract: tx.contractAddress,
+            tokenName: tx.tokenName,
+            tokenDecimals: decimals,
+          },
+        });
+      }
+    }
+    // If tokenRes failed but normalRes succeeded: silent pass — most often this is
+    // a per-call rate limit on a heavy chain. Native data is still useful.
 
     return ok(txs);
   }

@@ -3,7 +3,7 @@
 //
 // V0 connector coverage:
 //   - Bybit:      full (trades, deposits/withdrawals, fees, interest from V5 transaction-log)
-//   - MetaMask:   native ETH/MATIC/BNB transfers across all selected chains
+//   - MetaMask:   native ETH/MATIC/BNB transfers + ERC-20 transfers across all selected chains
 //   - Polymarket: stub (returns []), endpoint discovery is Day 8-10 polish work
 //
 // `since` accepts both:
@@ -18,7 +18,7 @@ import type { Transaction } from "../../types.ts";
 export const GET_TRANSACTIONS_TOOL_NAME = "get_transactions";
 
 export const GET_TRANSACTIONS_DESCRIPTION = [
-  "Returns transaction history (trades, deposits, withdrawals, fees) across configured accounts.",
+  "Returns transaction history (trades, deposits, withdrawals, fees, ERC-20 token transfers) across configured accounts.",
   "Use this when the user asks: 'what trades did I make', 'show my transactions',",
   "'transaction history', 'recent buys', 'recent sells', 'show my deposits',",
   "'when did I buy X', 'what did I do this week', etc.",
@@ -37,7 +37,7 @@ export const GET_TRANSACTIONS_DESCRIPTION = [
   "",
   "Coverage caveats (V0):",
   "  - Bybit: full transaction log",
-  "  - MetaMask: native chain transfers only (ERC-20 transfers Day 8-10)",
+  "  - MetaMask: native chain transfers + ERC-20 token transfers (USDC, USDT, etc.)",
   "  - Polymarket: NOT YET — endpoint discovery is Day 8-10 polish.",
   "    If user asks for Polymarket trades specifically, tell them this honestly.",
 ].join(" ");
@@ -84,7 +84,7 @@ export interface GetTransactionsResult {
     asOf: string;
     coverage: {
       polymarket: "not_implemented_in_v0";
-      metamask: "native_transfers_only_v0";
+      metamask: "native_and_erc20_transfers";
       bybit: "full";
     };
   };
@@ -174,7 +174,7 @@ export async function executeGetTransactions(
       asOf: new Date().toISOString(),
       coverage: {
         polymarket: "not_implemented_in_v0",
-        metamask: "native_transfers_only_v0",
+        metamask: "native_and_erc20_transfers",
         bybit: "full",
       },
     },

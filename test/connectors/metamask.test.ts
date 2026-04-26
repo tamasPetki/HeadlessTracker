@@ -261,6 +261,181 @@ describe("MetaMaskConnector.fetchHoldings (mocked Etherscan)", () => {
     expect(bscCalls).toBe(1);
   });
 
+  test("fetchTransactions: returns native + ERC-20 transfers from a chain", async () => {
+    // Etherscan V2 returns native (txlist) and token (tokentx) actions separately;
+    // fetchChainTransactions issues both and merges them. We verify both legs land
+    // in the result with correct decoding (native uses chain decimals, token uses
+    // tokenDecimal from the response).
+    let txlistCalls = 0;
+    let tokentxCalls = 0;
+    globalThis.fetch = (async (input: string | URL): Promise<Response> => {
+      const url = input.toString();
+      if (url.includes("action=txlist")) {
+        txlistCalls++;
+        return new Response(JSON.stringify({
+          status: "1", message: "OK", result: [
+            {
+              blockNumber: "19000000",
+              timeStamp: "1700000000",
+              hash: "0xnativehash",
+              from: "0xabcdef1234567890abcdef1234567890abcdef12",
+              to: "0xrecipient000000000000000000000000000000aa",
+              value: "1000000000000000000",   // 1 ETH
+              gasUsed: "21000",
+              gasPrice: "20000000000",
+              isError: "0",
+            },
+          ],
+        }), { status: 200 });
+      }
+      if (url.includes("action=tokentx")) {
+        tokentxCalls++;
+        return new Response(JSON.stringify({
+          status: "1", message: "OK", result: [
+            {
+              blockNumber: "19000001",
+              timeStamp: "1700000100",
+              hash: "0xtokenhash",
+              from: "0xsender0000000000000000000000000000000000",
+              to: "0xabcdef1234567890abcdef1234567890abcdef12",
+              value: "100000000",              // 100 USDC (6 decimals)
+              contractAddress: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              tokenName: "USD Coin",
+              tokenSymbol: "USDC",
+              tokenDecimal: "6",
+              gasUsed: "65000",
+              gasPrice: "20000000000",
+            },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ status: "1", message: "OK", result: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new MetaMaskConnector();
+    const account: Account = {
+      id: "metamask:0xabc",
+      connectorId: "metamask",
+      label: "Test",
+      createdAt: 1,
+    };
+    const result = await conn.fetchTransactions({
+      account,
+      credentials: {
+        address: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12",
+        etherscanApiKey: "K",
+        chainIds: [1],
+        trackCommonTokens: false,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(txlistCalls).toBe(1);
+    expect(tokentxCalls).toBe(1);
+    if (result.ok) {
+      expect(result.value).toHaveLength(2);
+      const native = result.value.find((t) => t.symbol === "ETH");
+      const usdc = result.value.find((t) => t.symbol === "USDC");
+      expect(native).toBeDefined();
+      expect(usdc).toBeDefined();
+      expect(native!.quantity).toBe(1);
+      expect(native!.type).toBe("withdraw");           // I sent it
+      expect(native!.metadata?.asset).toBe("native");
+      expect(usdc!.quantity).toBe(100);
+      expect(usdc!.type).toBe("deposit");              // I received it
+      expect(usdc!.fee).toBe(0);                        // recipient pays no fee
+      expect(usdc!.metadata?.asset).toBe("erc20");
+      expect(usdc!.metadata?.contract).toBe("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48");
+      // ERC-20 txId disambiguates by contract to avoid clobbering native tx with same hash.
+      expect(usdc!.txId).toContain("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48");
+    }
+  });
+
+  test("fetchTransactions: token-leg failure does NOT kill native data on the same chain", async () => {
+    // Real-world: Etherscan tokentx call hits per-second rate limit while txlist
+    // succeeded. We must still return the native txs rather than failing the whole chain.
+    globalThis.fetch = (async (input: string | URL): Promise<Response> => {
+      const url = input.toString();
+      if (url.includes("action=txlist")) {
+        return new Response(JSON.stringify({
+          status: "1", message: "OK", result: [
+            {
+              blockNumber: "19000000", timeStamp: "1700000000",
+              hash: "0xnative", from: "0xfrom", to: "0xabcdef1234567890abcdef1234567890abcdef12",
+              value: "500000000000000000", gasUsed: "21000", gasPrice: "20000000000", isError: "0",
+            },
+          ],
+        }), { status: 200 });
+      }
+      if (url.includes("action=tokentx")) {
+        return new Response("rate limited", { status: 429 });
+      }
+      return new Response(JSON.stringify({ status: "1", message: "OK", result: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new MetaMaskConnector();
+    const result = await conn.fetchTransactions({
+      account: { id: "metamask:0xabc", connectorId: "metamask", label: "x", createdAt: 1 },
+      credentials: {
+        address: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12",
+        etherscanApiKey: "K", chainIds: [1], trackCommonTokens: false,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]!.symbol).toBe("ETH");
+    }
+  });
+
+  test("fetchTransactions: tokenDecimal=NaN entries are skipped", async () => {
+    // Defensive parse: if Etherscan returns a malformed tokenDecimal we should
+    // skip the row rather than emit NaN as quantity.
+    globalThis.fetch = (async (input: string | URL): Promise<Response> => {
+      const url = input.toString();
+      if (url.includes("action=tokentx")) {
+        return new Response(JSON.stringify({
+          status: "1", message: "OK", result: [
+            {
+              blockNumber: "1", timeStamp: "1700000000", hash: "0xa",
+              from: "0xfrom", to: "0xabcdef1234567890abcdef1234567890abcdef12",
+              value: "1000", contractAddress: "0xc1",
+              tokenName: "Bad", tokenSymbol: "BAD", tokenDecimal: "not-a-number",
+              gasUsed: "1", gasPrice: "1",
+            },
+            {
+              blockNumber: "2", timeStamp: "1700000001", hash: "0xb",
+              from: "0xfrom", to: "0xabcdef1234567890abcdef1234567890abcdef12",
+              value: "1000000", contractAddress: "0xc2",
+              tokenName: "Good", tokenSymbol: "GOOD", tokenDecimal: "6",
+              gasUsed: "1", gasPrice: "1",
+            },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ status: "1", message: "OK", result: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new MetaMaskConnector();
+    const result = await conn.fetchTransactions({
+      account: { id: "metamask:0xabc", connectorId: "metamask", label: "x", createdAt: 1 },
+      credentials: {
+        address: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12",
+        etherscanApiKey: "K", chainIds: [1], trackCommonTokens: false,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Only GOOD survives; BAD's NaN decimals are filtered.
+      const tokens = result.value.filter((t) => t.metadata?.asset === "erc20");
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0]!.symbol).toBe("GOOD");
+      expect(tokens[0]!.quantity).toBe(1);
+    }
+  });
+
   test("HTTP 429 → rate_limited", async () => {
     globalThis.fetch = (async (): Promise<Response> => {
       return new Response("rate limited", { status: 429 });
