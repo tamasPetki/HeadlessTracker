@@ -48,7 +48,7 @@ import {
 } from "./tools/get_allocations.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.6.0-day6";
+const SERVER_VERSION = "0.7.0-burn-in";
 
 export function createMcpServer(): McpServer {
   const server = new McpServer(

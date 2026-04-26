@@ -19,7 +19,7 @@ import { runStdioServer } from "../src/mcp/server.ts";
 import type { Account } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
 
-const VERSION = "0.6.0-day6";
+const VERSION = "0.7.0-burn-in";
 
 function printHelp(): void {
   console.log(`headless-tracker v${VERSION}
