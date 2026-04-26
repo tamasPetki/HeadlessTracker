@@ -15,18 +15,11 @@ import { defaultAccountStore } from "../src/accounts.ts";
 import { BybitConnector } from "../src/connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask.ts";
 import { PolymarketConnector } from "../src/connectors/polymarket.ts";
-import type { Connector } from "../src/connectors/types.ts";
 import { runStdioServer } from "../src/mcp/server.ts";
-import type { Account, ConnectorId } from "../src/types.ts";
+import type { Account } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
 
-const VERSION = "0.5.0-day5";
-
-const CONNECTORS: Record<ConnectorId, () => Connector> = {
-  bybit: () => new BybitConnector(),
-  metamask: () => new MetaMaskConnector(),
-  polymarket: () => new PolymarketConnector(),
-};
+const VERSION = "0.6.0-day6";
 
 function printHelp(): void {
   console.log(`headless-tracker v${VERSION}

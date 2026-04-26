@@ -3,9 +3,9 @@
 // Wired from bin/headless-tracker.ts when invoked without subcommand args
 // (the default mode for claude_desktop_config.json).
 //
-// Day 5 V0: 2 tools (get_holdings, refresh_data) — proves the integration
-// end-to-end. Day 6 adds the remaining 4 (get_pnl, get_polymarket_positions,
-// get_transactions, get_allocations).
+// V0.6 (Day 6): all 6 tools wired:
+//   get_holdings, refresh_data, get_pnl, get_polymarket_positions,
+//   get_transactions, get_allocations.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -22,9 +22,33 @@ import {
   REFRESH_DATA_INPUT_SCHEMA,
   executeRefreshData,
 } from "./tools/refresh_data.ts";
+import {
+  GET_PNL_TOOL_NAME,
+  GET_PNL_DESCRIPTION,
+  GET_PNL_INPUT_SCHEMA,
+  executeGetPnl,
+} from "./tools/get_pnl.ts";
+import {
+  GET_POLYMARKET_POSITIONS_TOOL_NAME,
+  GET_POLYMARKET_POSITIONS_DESCRIPTION,
+  GET_POLYMARKET_POSITIONS_INPUT_SCHEMA,
+  executeGetPolymarketPositions,
+} from "./tools/get_polymarket_positions.ts";
+import {
+  GET_TRANSACTIONS_TOOL_NAME,
+  GET_TRANSACTIONS_DESCRIPTION,
+  GET_TRANSACTIONS_INPUT_SCHEMA,
+  executeGetTransactions,
+} from "./tools/get_transactions.ts";
+import {
+  GET_ALLOCATIONS_TOOL_NAME,
+  GET_ALLOCATIONS_DESCRIPTION,
+  GET_ALLOCATIONS_INPUT_SCHEMA,
+  executeGetAllocations,
+} from "./tools/get_allocations.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.5.0-day5";
+const SERVER_VERSION = "0.6.0-day6";
 
 export function createMcpServer(): McpServer {
   const server = new McpServer(
@@ -37,6 +61,7 @@ export function createMcpServer(): McpServer {
   // TS2589 "Type instantiation is excessively deep" when both InputArgs and
   // OutputArgs have to be inferred. `tool()` works identically at runtime with
   // simpler generics. Revisit once the SDK stabilizes the registerTool overloads.
+
   server.tool(
     GET_HOLDINGS_TOOL_NAME,
     GET_HOLDINGS_DESCRIPTION,
@@ -61,6 +86,54 @@ export function createMcpServer(): McpServer {
     }
   );
 
+  server.tool(
+    GET_PNL_TOOL_NAME,
+    GET_PNL_DESCRIPTION,
+    GET_PNL_INPUT_SCHEMA,
+    async (args) => {
+      const result = await executeGetPnl(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    GET_POLYMARKET_POSITIONS_TOOL_NAME,
+    GET_POLYMARKET_POSITIONS_DESCRIPTION,
+    GET_POLYMARKET_POSITIONS_INPUT_SCHEMA,
+    async (args) => {
+      const result = await executeGetPolymarketPositions(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    GET_TRANSACTIONS_TOOL_NAME,
+    GET_TRANSACTIONS_DESCRIPTION,
+    GET_TRANSACTIONS_INPUT_SCHEMA,
+    async (args) => {
+      const result = await executeGetTransactions(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    GET_ALLOCATIONS_TOOL_NAME,
+    GET_ALLOCATIONS_DESCRIPTION,
+    GET_ALLOCATIONS_INPUT_SCHEMA,
+    async (args) => {
+      const result = await executeGetAllocations(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
   return server;
 }
 
@@ -69,12 +142,9 @@ export async function runStdioServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Keep alive until stdin closes (claude_desktop kills the process on session end).
-  // No setInterval needed — connect() returns immediately, the transport keeps the
-  // event loop busy via stdin's readable stream.
 }
 
-// Allow running this module directly via `bun run src/mcp/server.ts` for debugging,
-// in addition to being imported by bin/headless-tracker.ts.
+// Allow running this module directly via `bun run src/mcp/server.ts` for debugging.
 if (import.meta.main) {
   runStdioServer().catch((e: Error) => {
     process.stderr.write(`MCP server fatal: ${e.message}\n${e.stack ?? ""}\n`);
