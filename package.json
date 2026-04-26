@@ -12,7 +12,18 @@
     "setup": "bun run bin/headless-tracker.ts setup",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "typecheck": "bun --bun tsc --noEmit"
+    "typecheck": "bun --bun tsc --noEmit",
+    "prepublishOnly": "bun test && bun --bun tsc --noEmit"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "tsconfig.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "mcp",

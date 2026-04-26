@@ -74,9 +74,67 @@ async function readLine(prompt: string): Promise<string> {
 }
 
 async function readSecret(prompt: string): Promise<string> {
-  // Hiding stdin echo cleanly across platforms is non-trivial — Day 8-10
-  // polish will add proper hidden input. For now input is visible.
-  return readLine(prompt + " (input visible — Day 1-2 MVP, will be masked in v0.3): ");
+  // If stdin isn't a TTY (test harness, piped input), fall back to plain readline.
+  // setRawMode is unavailable / pointless in that case.
+  if (!process.stdin.isTTY) {
+    return readLine(prompt + " ");
+  }
+
+  // Raw-mode hidden input. Conflicts with the readline interface, so close it
+  // first; the next getReadline() call (in subsequent prompts) will re-create.
+  closeReadline();
+
+  process.stdout.write(prompt + " ");
+
+  return new Promise<string>((resolve, reject) => {
+    const stdin = process.stdin;
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+
+    let buffer = "";
+
+    const cleanup = (): void => {
+      stdin.setRawMode(false);
+      stdin.pause();
+      stdin.removeListener("data", onData);
+    };
+
+    const onData = (chunk: string): void => {
+      for (const ch of chunk) {
+        switch (ch) {
+          case "\r":
+          case "\n":
+          case "": // Ctrl+D / EOT
+            cleanup();
+            process.stdout.write("\n");
+            resolve(buffer.trim());
+            return;
+          case "": // Ctrl+C
+            cleanup();
+            process.stdout.write("\n");
+            reject(new Error("aborted"));
+            return;
+          case "": // Backspace (DEL)
+          case "\b": {
+            if (buffer.length > 0) {
+              buffer = buffer.slice(0, -1);
+              process.stdout.write("\b \b");
+            }
+            break;
+          }
+          default:
+            // Filter out other control chars (escape sequences from arrow keys, etc).
+            if (ch >= " " && ch !== "") {
+              buffer += ch;
+              process.stdout.write("*");
+            }
+        }
+      }
+    };
+
+    stdin.on("data", onData);
+  });
 }
 
 async function readYesNo(prompt: string, defaultYes = true): Promise<boolean> {
