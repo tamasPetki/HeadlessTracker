@@ -1,3 +1,4 @@
+<!-- /autoplan restore point: /Users/kriptom/.gstack/projects/HeadlessTracker/main-autoplan-restore-20260426-214656.md -->
 # Roadmap
 
 > Where headless-tracker is, where it's going, and what's intentionally out of scope.
