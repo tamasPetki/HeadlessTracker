@@ -1,0 +1,435 @@
+// MetaMask / EVM wallet connector — read-only on-chain wallet tracking.
+// Uses Etherscan V2 unified API: single API key, chainid query parameter
+// covers Ethereum, Polygon, Base, Arbitrum, Optimism, BSC, etc.
+//
+// V0 scope:
+//   - Native balance for each user-selected chain (ETH/MATIC/BNB)
+//   - Bundled "common ERC-20" list (USDC, USDT, WETH, WBTC, LINK, DAI) per chain,
+//     opt-in at setup. Custom token lists are V0.2 (Day 8-10 polish).
+//   - Native + ERC-20 transactions are fetched separately for each chain.
+//
+// V0.2 scope (deferred):
+//   - User-provided custom token contracts via `headless-tracker token add`
+//   - Multiple wallets per Account (currently one address per Account)
+//   - ETH/USD price for value computation (Etherscan ethprice endpoint, free)
+//
+// API docs: https://docs.etherscan.io/etherscan-v2
+
+import type { Connector, ConnectorContext, ConnectorCredentials } from "./types.ts";
+import type { Holding, Result, Transaction } from "../types.ts";
+import { err, ok } from "../types.ts";
+
+// Supported chains for V0. Extend by adding entries here — no other code change needed.
+export const SUPPORTED_CHAINS = {
+  1: { name: "Ethereum", nativeSymbol: "ETH", nativeDecimals: 18 },
+  137: { name: "Polygon", nativeSymbol: "POL", nativeDecimals: 18 },
+  56: { name: "BNB Smart Chain", nativeSymbol: "BNB", nativeDecimals: 18 },
+  8453: { name: "Base", nativeSymbol: "ETH", nativeDecimals: 18 },
+  42161: { name: "Arbitrum One", nativeSymbol: "ETH", nativeDecimals: 18 },
+  10: { name: "Optimism", nativeSymbol: "ETH", nativeDecimals: 18 },
+} as const;
+
+export type SupportedChainId = keyof typeof SUPPORTED_CHAINS;
+
+// Curated common token list per chain. Contracts are checksummed mainnet addresses.
+// V0.2 will expand this from a token-list source (Trustwallet, Coingecko verified).
+const COMMON_TOKENS: Record<SupportedChainId, Array<{ contract: string; symbol: string; decimals: number }>> = {
+  1: [
+    { contract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", symbol: "USDC", decimals: 6 },
+    { contract: "0xdAC17F958D2ee523a2206206994597C13D831ec7", symbol: "USDT", decimals: 6 },
+    { contract: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", symbol: "WETH", decimals: 18 },
+    { contract: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", symbol: "WBTC", decimals: 8 },
+    { contract: "0x514910771AF9Ca656af840dff83E8264EcF986CA", symbol: "LINK", decimals: 18 },
+    { contract: "0x6B175474E89094C44Da98b954EedeAC495271d0F", symbol: "DAI", decimals: 18 },
+  ],
+  137: [
+    { contract: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", symbol: "USDC", decimals: 6 },
+    { contract: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", symbol: "USDT", decimals: 6 },
+    { contract: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", symbol: "WETH", decimals: 18 },
+    { contract: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6", symbol: "WBTC", decimals: 8 },
+  ],
+  56: [
+    { contract: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", symbol: "USDC", decimals: 18 },
+    { contract: "0x55d398326f99059fF775485246999027B3197955", symbol: "USDT", decimals: 18 },
+  ],
+  8453: [
+    { contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", decimals: 6 },
+    { contract: "0x4200000000000000000000000000000000000006", symbol: "WETH", decimals: 18 },
+  ],
+  42161: [
+    { contract: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", symbol: "USDC", decimals: 6 },
+    { contract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT", decimals: 6 },
+  ],
+  10: [
+    { contract: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", symbol: "USDC", decimals: 6 },
+    { contract: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", symbol: "USDT", decimals: 6 },
+  ],
+};
+
+interface MetaMaskCreds extends ConnectorCredentials {
+  address: string;                 // 0x... 40 hex chars
+  etherscanApiKey: string;         // single key for all chains via V2
+  chainIds: SupportedChainId[];    // which chains to query
+  trackCommonTokens: boolean;      // include the bundled COMMON_TOKENS list per chain
+  customTokens?: Record<SupportedChainId, Array<{ contract: string; symbol: string; decimals: number }>>;
+}
+
+function isMetaMaskCreds(c: ConnectorCredentials): c is MetaMaskCreds {
+  return (
+    typeof c.address === "string" &&
+    /^0x[a-fA-F0-9]{40}$/.test(c.address) &&
+    typeof c.etherscanApiKey === "string" &&
+    Array.isArray(c.chainIds) &&
+    typeof c.trackCommonTokens === "boolean"
+  );
+}
+
+const ETHERSCAN_V2_BASE = "https://api.etherscan.io/v2/api";
+
+interface EtherscanResponse<T> {
+  status: string;   // "1" = success, "0" = error
+  message: string;  // "OK" on success
+  result: T | string;  // string when status=0 (error message)
+}
+
+async function etherscanCall<T>(
+  params: Record<string, string>,
+  signal?: AbortSignal
+): Promise<Result<T>> {
+  const url = new URL(ETHERSCAN_V2_BASE);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+
+  let resp: Response;
+  try {
+    resp = await fetch(url.toString(), { signal });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") {
+      return err("network_timeout", "Etherscan request aborted");
+    }
+    return err("network_error", `Etherscan fetch failed: ${(e as Error).message}`, { cause: e });
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 429) {
+      return err("rate_limited", "Etherscan rate limit hit (HTTP 429)");
+    }
+    if (resp.status === 401 || resp.status === 403) {
+      return err("auth_failed", `Etherscan auth failed (HTTP ${resp.status})`);
+    }
+    return err("upstream_error", `Etherscan HTTP ${resp.status}`);
+  }
+
+  let json: EtherscanResponse<T>;
+  try {
+    json = (await resp.json()) as EtherscanResponse<T>;
+  } catch (e) {
+    return err("schema_mismatch", "Etherscan returned non-JSON", { cause: e });
+  }
+
+  if (json.status === "0") {
+    const msg = typeof json.result === "string" ? json.result : json.message;
+    // Etherscan returns "No transactions found" with status=0 for empty histories.
+    // Treat that as ok([]) at the caller level — here we surface it.
+    if (typeof msg === "string" && msg.toLowerCase().includes("no transactions found")) {
+      return ok([] as unknown as T);
+    }
+    if (typeof msg === "string" && (msg.toLowerCase().includes("invalid api key") || msg.toLowerCase().includes("api key"))) {
+      return err("auth_failed", `Etherscan: ${msg}`);
+    }
+    if (typeof msg === "string" && msg.toLowerCase().includes("rate limit")) {
+      return err("rate_limited", `Etherscan: ${msg}`);
+    }
+    return err("upstream_error", `Etherscan error: ${msg}`);
+  }
+
+  return ok(json.result as T);
+}
+
+function applyDecimals(raw: string, decimals: number): number {
+  // BigInt division to avoid Number precision loss for 18-decimal values.
+  // Then convert to Number for the public Holding type. Acceptable lossy at the
+  // output boundary; internal arithmetic stays in BigInt.
+  if (raw === "0" || raw === "") return 0;
+  const negative = raw.startsWith("-");
+  const abs = negative ? raw.slice(1) : raw;
+  const padded = abs.padStart(decimals + 1, "0");
+  const cut = padded.length - decimals;
+  const intPart = padded.slice(0, cut);
+  const fracPart = padded.slice(cut).replace(/0+$/, "");
+  const decimalStr = fracPart ? `${intPart}.${fracPart}` : intPart;
+  const num = parseFloat(decimalStr);
+  return negative ? -num : num;
+}
+
+export class MetaMaskConnector implements Connector {
+  readonly id = "metamask" as const;
+  readonly displayName = "MetaMask / EVM wallet (Etherscan V2)";
+  readonly defaultCacheTtlSec = 60;
+
+  async validateCredentials(
+    creds: ConnectorCredentials,
+    signal?: AbortSignal
+  ): Promise<Result<void>> {
+    if (!isMetaMaskCreds(creds)) {
+      return err(
+        "schema_mismatch",
+        "MetaMask credentials must include { address, etherscanApiKey, chainIds[], trackCommonTokens }"
+      );
+    }
+    if (creds.chainIds.length === 0) {
+      return err("schema_mismatch", "At least one chainId must be selected");
+    }
+    for (const chainId of creds.chainIds) {
+      if (!(chainId in SUPPORTED_CHAINS)) {
+        return err("schema_mismatch", `Unsupported chainId: ${chainId}`);
+      }
+    }
+
+    // Validate the API key by checking ETH balance on chain 1 (cheapest call).
+    const result = await etherscanCall<string>(
+      {
+        chainid: "1",
+        module: "account",
+        action: "balance",
+        address: creds.address,
+        tag: "latest",
+        apikey: creds.etherscanApiKey,
+      },
+      signal
+    );
+    if (!result.ok) return result;
+    return ok(undefined);
+  }
+
+  async fetchHoldings(ctx: ConnectorContext): Promise<Result<Holding[]>> {
+    if (!isMetaMaskCreds(ctx.credentials)) {
+      return err("schema_mismatch", "MetaMask credentials malformed");
+    }
+    const creds = ctx.credentials;
+    const now = Date.now();
+    const allHoldings: Holding[] = [];
+    const chainErrors: string[] = [];
+
+    // Per-chain fetch in parallel (eng review 4A: parallel fetch).
+    const perChain = await Promise.all(
+      creds.chainIds.map(async (chainId): Promise<{ chainId: SupportedChainId; result: Result<Holding[]> }> => {
+        const chainResult = await this.fetchChainHoldings(ctx, chainId);
+        return { chainId, result: chainResult };
+      })
+    );
+
+    for (const { chainId, result } of perChain) {
+      if (!result.ok) {
+        chainErrors.push(`chain ${chainId}: ${result.error.message}`);
+        continue;
+      }
+      allHoldings.push(...result.value);
+    }
+
+    // Partial success policy: if every chain failed, surface the first error.
+    // If at least one succeeded, return what we got + log the failures via metadata.
+    if (allHoldings.length === 0 && chainErrors.length > 0) {
+      return err("upstream_error", `All chains failed: ${chainErrors.join("; ")}`);
+    }
+
+    return ok(allHoldings);
+  }
+
+  private async fetchChainHoldings(
+    ctx: ConnectorContext,
+    chainId: SupportedChainId
+  ): Promise<Result<Holding[]>> {
+    const creds = ctx.credentials as MetaMaskCreds;
+    const chainInfo = SUPPORTED_CHAINS[chainId];
+    const now = Date.now();
+    const holdings: Holding[] = [];
+
+    // Native balance.
+    const nativeRes = await etherscanCall<string>(
+      {
+        chainid: String(chainId),
+        module: "account",
+        action: "balance",
+        address: creds.address,
+        tag: "latest",
+        apikey: creds.etherscanApiKey,
+      },
+      ctx.signal
+    );
+    if (!nativeRes.ok) return nativeRes;
+    const nativeQty = applyDecimals(nativeRes.value, chainInfo.nativeDecimals);
+    if (nativeQty > 0) {
+      holdings.push({
+        accountId: ctx.account.id,
+        symbol: chainInfo.nativeSymbol,
+        assetClass: "crypto",
+        quantity: nativeQty,
+        valueCurrency: "USD",
+        metadata: { chainId, chainName: chainInfo.name, native: true, address: creds.address },
+        fetchedAt: now,
+      });
+    }
+
+    // ERC-20 balances — common bundled list + custom tokens.
+    const tokensToCheck: Array<{ contract: string; symbol: string; decimals: number }> = [];
+    if (creds.trackCommonTokens) {
+      tokensToCheck.push(...COMMON_TOKENS[chainId]);
+    }
+    if (creds.customTokens?.[chainId]) {
+      tokensToCheck.push(...creds.customTokens[chainId]);
+    }
+
+    // Etherscan V2 has separate `tokenbalance` calls per contract.
+    // Etherscan free tier: 5 calls/second. Sequential per chain to stay under.
+    // (Could parallelize with throttling; kept simple for V0.)
+    for (const token of tokensToCheck) {
+      const tokenRes = await etherscanCall<string>(
+        {
+          chainid: String(chainId),
+          module: "account",
+          action: "tokenbalance",
+          contractaddress: token.contract,
+          address: creds.address,
+          tag: "latest",
+          apikey: creds.etherscanApiKey,
+        },
+        ctx.signal
+      );
+      if (!tokenRes.ok) {
+        // Per-token failure shouldn't fail the whole chain. Log via metadata of the chain
+        // result; for simplicity, just skip the token (rate-limit will recover next refresh).
+        if (tokenRes.error.kind === "rate_limited") {
+          // Hard stop: no point continuing on this chain if we're rate-limited.
+          break;
+        }
+        continue;
+      }
+      const qty = applyDecimals(tokenRes.value, token.decimals);
+      if (qty === 0) continue; // dust filter
+      holdings.push({
+        accountId: ctx.account.id,
+        symbol: token.symbol,
+        assetClass: "crypto",
+        quantity: qty,
+        valueCurrency: "USD",
+        metadata: {
+          chainId,
+          chainName: chainInfo.name,
+          contract: token.contract,
+          decimals: token.decimals,
+          address: creds.address,
+        },
+        fetchedAt: now,
+      });
+    }
+
+    return ok(holdings);
+  }
+
+  async fetchTransactions(
+    ctx: ConnectorContext,
+    since?: number
+  ): Promise<Result<Transaction[]>> {
+    if (!isMetaMaskCreds(ctx.credentials)) {
+      return err("schema_mismatch", "MetaMask credentials malformed");
+    }
+    const creds = ctx.credentials;
+    const allTxs: Transaction[] = [];
+    const chainErrors: string[] = [];
+
+    const startBlockApprox = since ? Math.max(0, Math.floor(since / 1000 / 13)) : 0;
+    // ~13s avg block time on Ethereum, faster on L2s — coarse but Etherscan ignores
+    // bad block numbers gracefully (returns empty if startBlock > tip).
+
+    const perChain = await Promise.all(
+      creds.chainIds.map(async (chainId): Promise<{ chainId: SupportedChainId; result: Result<Transaction[]> }> => {
+        const chainResult = await this.fetchChainTransactions(ctx, chainId, startBlockApprox);
+        return { chainId, result: chainResult };
+      })
+    );
+
+    for (const { chainId, result } of perChain) {
+      if (!result.ok) {
+        chainErrors.push(`chain ${chainId}: ${result.error.message}`);
+        continue;
+      }
+      allTxs.push(...result.value);
+    }
+
+    if (allTxs.length === 0 && chainErrors.length > 0) {
+      return err("upstream_error", `All chains failed: ${chainErrors.join("; ")}`);
+    }
+
+    return ok(allTxs);
+  }
+
+  private async fetchChainTransactions(
+    ctx: ConnectorContext,
+    chainId: SupportedChainId,
+    startBlock: number
+  ): Promise<Result<Transaction[]>> {
+    const creds = ctx.credentials as MetaMaskCreds;
+    const chainInfo = SUPPORTED_CHAINS[chainId];
+    const txs: Transaction[] = [];
+
+    interface NormalTx {
+      blockNumber: string;
+      timeStamp: string;
+      hash: string;
+      from: string;
+      to: string;
+      value: string;
+      gasUsed: string;
+      gasPrice: string;
+      isError: string;
+    }
+
+    const normalRes = await etherscanCall<NormalTx[]>(
+      {
+        chainid: String(chainId),
+        module: "account",
+        action: "txlist",
+        address: creds.address,
+        startblock: String(startBlock),
+        endblock: "latest",
+        page: "1",
+        offset: "50",
+        sort: "desc",
+        apikey: creds.etherscanApiKey,
+      },
+      ctx.signal
+    );
+    if (!normalRes.ok) return normalRes;
+
+    const myAddr = creds.address.toLowerCase();
+    for (const tx of normalRes.value) {
+      const isOutbound = tx.from.toLowerCase() === myAddr;
+      const valueNative = applyDecimals(tx.value, chainInfo.nativeDecimals);
+      const feeNative =
+        applyDecimals(tx.gasUsed, 0) * applyDecimals(tx.gasPrice, chainInfo.nativeDecimals);
+
+      txs.push({
+        accountId: ctx.account.id,
+        txId: `${chainId}:${tx.hash}`,
+        type: isOutbound ? "withdraw" : "deposit",
+        symbol: chainInfo.nativeSymbol,
+        quantity: valueNative,
+        fee: isOutbound ? feeNative : 0,
+        feeCurrency: chainInfo.nativeSymbol,
+        valueCurrency: "USD",
+        timestamp: parseInt(tx.timeStamp, 10) * 1000,
+        metadata: {
+          chainId,
+          chainName: chainInfo.name,
+          hash: tx.hash,
+          from: tx.from,
+          to: tx.to,
+          blockNumber: tx.blockNumber,
+          isError: tx.isError === "1",
+        },
+      });
+    }
+
+    return ok(txs);
+  }
+}

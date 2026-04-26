@@ -11,6 +11,10 @@ export interface Account {
   connectorId: ConnectorId;
   label: string;                 // human-readable, e.g. "Bybit UNIFIED" or "MetaMask 0xabc...123"
   createdAt: number;             // epoch ms
+  // Connector-specific configuration that isn't credentials and isn't ephemeral.
+  // Examples: { chains: [1, 137], tokens: [...] } for MetaMask;
+  //           { accountType: "UNIFIED" } for Bybit (mirrored from credentials for query convenience).
+  metadata?: Record<string, unknown>;
 }
 
 export interface Holding {
