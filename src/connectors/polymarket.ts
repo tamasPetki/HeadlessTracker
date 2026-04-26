@@ -9,10 +9,10 @@
 // V0.3 scope (this file):
 //   - fetchHoldings: full implementation, returns one Holding per position with
 //     rich metadata (title, slug, eventId, redeemable/mergeable flags, P&L)
-//   - fetchTransactions: stubbed — returns ok([]). The /trades?user=X endpoint
-//     consistently returned empty in API probing; the right endpoint or query
-//     parameter for "user's own trades" is not yet identified. Day 8-10 polish
-//     will resolve this.
+//   - fetchTransactions: full implementation via /trades?user=X with offset
+//     pagination + client-side `since` filter. The data-api ignores ts/before/
+//     after query params (verified empirically 2026-04), so we paginate DESC by
+//     timestamp and stop once a page falls entirely before `since`.
 //
 // API docs (sparse but functional): https://docs.polymarket.com/
 
@@ -205,14 +205,119 @@ export class PolymarketConnector implements Connector {
   }
 
   async fetchTransactions(
-    _ctx: ConnectorContext,
-    _since?: number
+    ctx: ConnectorContext,
+    since?: number
   ): Promise<Result<Transaction[]>> {
-    // V0.3: stubbed. The /trades?user=X endpoint returned empty for all probed
-    // addresses, including known whales. Identifying the correct endpoint or
-    // query parameter for user-scoped trade history is Day 8-10 polish work.
-    // Until then, we surface positions only (which already include avg/realized P&L
-    // metadata, covering most "how am I doing" questions).
-    return ok([]);
+    if (!isPolymarketCreds(ctx.credentials)) {
+      return err("schema_mismatch", "Polymarket credentials malformed");
+    }
+    const creds = ctx.credentials;
+    const sinceSec = since ? Math.floor(since / 1000) : undefined;
+
+    // Pagination: data-api returns DESC by timestamp. We pull until either
+    // (a) page returns < pageSize (out of history), or
+    // (b) page's oldest timestamp falls below `since` (we've crossed the cutoff), or
+    // (c) we hit MAX_PAGES as a safety net for users with massive trade history.
+    const PAGE_SIZE = 100;
+    const MAX_PAGES = 10;       // 1000 trades; covers ~all realistic V0 usage
+
+    const trades: PolymarketTrade[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const url = new URL(`${DATA_API_BASE}/trades`);
+      url.searchParams.set("user", creds.proxyWallet);
+      url.searchParams.set("limit", String(PAGE_SIZE));
+      url.searchParams.set("offset", String(page * PAGE_SIZE));
+
+      let resp: Response;
+      try {
+        resp = await fetch(url.toString(), { signal: ctx.signal });
+      } catch (e) {
+        if ((e as Error).name === "AbortError") {
+          return err("network_timeout", "Polymarket /trades aborted");
+        }
+        return err(
+          "network_error",
+          `Polymarket /trades fetch failed: ${(e as Error).message}`,
+          { cause: e }
+        );
+      }
+      if (resp.status === 429) {
+        const retryAfter = resp.headers.get("Retry-After");
+        return err("rate_limited", "Polymarket rate limit hit", {
+          retryAfter: retryAfter ? parseInt(retryAfter, 10) : undefined,
+        });
+      }
+      if (!resp.ok) {
+        return err("upstream_error", `Polymarket /trades HTTP ${resp.status}`);
+      }
+
+      let pageData: PolymarketTrade[];
+      try {
+        const json = await resp.json();
+        if (!Array.isArray(json)) {
+          return err("schema_mismatch", "Polymarket /trades returned non-array");
+        }
+        pageData = json as PolymarketTrade[];
+      } catch (e) {
+        return err("schema_mismatch", "Polymarket /trades returned invalid JSON", { cause: e });
+      }
+
+      trades.push(...pageData);
+
+      if (pageData.length < PAGE_SIZE) break;
+      if (sinceSec !== undefined) {
+        const oldestOnPage = pageData[pageData.length - 1]!.timestamp;
+        if (oldestOnPage < sinceSec) break;
+      }
+    }
+
+    // Client-side since filter (data-api doesn't honor server-side time bounds).
+    const filtered = sinceSec !== undefined
+      ? trades.filter((t) => t.timestamp >= sinceSec)
+      : trades;
+
+    const txs: Transaction[] = filtered.map((t) => ({
+      accountId: ctx.account.id,
+      // Disambiguate by conditionId because a single tx can interact with
+      // multiple markets (e.g. liquidity provision routes), and txhash alone
+      // wouldn't be unique.
+      txId: `polymarket:${t.transactionHash}:${t.conditionId}`,
+      type: t.side === "BUY" ? "buy" : "sell",
+      symbol: t.slug ? `${t.slug}:${t.outcome ?? "?"}` : `${t.conditionId}:${t.outcomeIndex ?? "?"}`,
+      quantity: t.size,
+      price: t.price,
+      valueCurrency: "USD",
+      timestamp: t.timestamp * 1000,
+      metadata: {
+        slug: t.slug,
+        outcome: t.outcome,
+        outcomeIndex: t.outcomeIndex,
+        title: t.title,
+        eventSlug: t.eventSlug,
+        conditionId: t.conditionId,
+        asset: t.asset,
+        hash: t.transactionHash,
+        side: t.side,
+      },
+    }));
+
+    return ok(txs);
   }
+}
+
+interface PolymarketTrade {
+  proxyWallet: string;
+  side: "BUY" | "SELL";
+  asset: string;
+  conditionId: string;
+  size: number;             // tokens
+  price: number;            // 0-1 (USDC per token)
+  timestamp: number;        // epoch SECONDS (not ms)
+  title: string;
+  slug: string;
+  icon?: string;
+  eventSlug?: string;
+  outcome: string;
+  outcomeIndex?: number;
+  transactionHash: string;
 }

@@ -4,7 +4,7 @@
 // V0 connector coverage:
 //   - Bybit:      full (trades, deposits/withdrawals, fees, interest from V5 transaction-log)
 //   - MetaMask:   native ETH/MATIC/BNB transfers + ERC-20 transfers across all selected chains
-//   - Polymarket: stub (returns []), endpoint discovery is Day 8-10 polish work
+//   - Polymarket: full (BUY/SELL trades from /trades?user=PROXY with offset pagination)
 //
 // `since` accepts both:
 //   - epoch ms (number) — passed straight through to connectors
@@ -38,8 +38,7 @@ export const GET_TRANSACTIONS_DESCRIPTION = [
   "Coverage caveats (V0):",
   "  - Bybit: full transaction log",
   "  - MetaMask: native chain transfers + ERC-20 token transfers (USDC, USDT, etc.)",
-  "  - Polymarket: NOT YET — endpoint discovery is Day 8-10 polish.",
-  "    If user asks for Polymarket trades specifically, tell them this honestly.",
+  "  - Polymarket: BUY/SELL trades from the /trades endpoint (up to ~1000 most recent).",
 ].join(" ");
 
 export const GET_TRANSACTIONS_INPUT_SCHEMA = {
@@ -83,7 +82,7 @@ export interface GetTransactionsResult {
     };
     asOf: string;
     coverage: {
-      polymarket: "not_implemented_in_v0";
+      polymarket: "trades_full";
       metamask: "native_and_erc20_transfers";
       bybit: "full";
     };
@@ -173,7 +172,7 @@ export async function executeGetTransactions(
       },
       asOf: new Date().toISOString(),
       coverage: {
-        polymarket: "not_implemented_in_v0",
+        polymarket: "trades_full",
         metamask: "native_and_erc20_transfers",
         bybit: "full",
       },

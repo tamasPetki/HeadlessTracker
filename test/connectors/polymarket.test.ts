@@ -3,7 +3,6 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { PolymarketConnector } from "../../src/connectors/polymarket.ts";
-import type { Account } from "../../src/types.ts";
 
 describe("PolymarketConnector.validateCredentials shape check", () => {
   test("rejects credentials missing proxyWallet", async () => {
@@ -28,15 +27,142 @@ describe("PolymarketConnector identity", () => {
     expect(c.displayName).toContain("Polymarket");
   });
 
-  test("fetchTransactions is V0-stub returning ok([])", async () => {
-    const c = new PolymarketConnector();
-    const account: Account = { id: "polymarket:0x1", connectorId: "polymarket", label: "p", createdAt: 1 };
-    const result = await c.fetchTransactions({
-      account,
+});
+
+describe("PolymarketConnector.fetchTransactions (mocked /trades)", () => {
+  const realFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function makeTrade(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      proxyWallet: "0xabc",
+      side: "BUY",
+      asset: "12345",
+      conditionId: "0xcond1",
+      size: 10,
+      price: 0.5,
+      timestamp: 1700000000,
+      title: "Will X happen?",
+      slug: "x-happen",
+      outcome: "Yes",
+      outcomeIndex: 0,
+      transactionHash: "0xhash1",
+      ...overrides,
+    };
+  }
+
+  test("maps /trades response to Transaction[] with correct shape", async () => {
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify([
+          makeTrade({ side: "BUY", size: 10, price: 0.5, timestamp: 1700000200, transactionHash: "0xa" }),
+          makeTrade({ side: "SELL", size: 5, price: 0.6, timestamp: 1700000100, transactionHash: "0xb", outcome: "No", outcomeIndex: 1 }),
+        ]),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const conn = new PolymarketConnector();
+    const result = await conn.fetchTransactions({
+      account: { id: "polymarket:0xabc", connectorId: "polymarket", label: "p", createdAt: 1 },
       credentials: { proxyWallet: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12" },
     });
+
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toEqual([]);
+    if (result.ok) {
+      expect(result.value).toHaveLength(2);
+      const buy = result.value[0]!;
+      expect(buy.type).toBe("buy");
+      expect(buy.symbol).toBe("x-happen:Yes");
+      expect(buy.quantity).toBe(10);
+      expect(buy.price).toBe(0.5);
+      // Polymarket gives epoch SECONDS — connector converts to ms.
+      expect(buy.timestamp).toBe(1700000200 * 1000);
+      // txId disambiguates by conditionId so multi-market txs don't collide.
+      expect(buy.txId).toBe("polymarket:0xa:0xcond1");
+      const sell = result.value[1]!;
+      expect(sell.type).toBe("sell");
+      expect(sell.symbol).toBe("x-happen:No");
+    }
+  });
+
+  test("client-side `since` filter drops trades older than cutoff", async () => {
+    // Data-api ignores time-bound query params, so we filter client-side. Confirm
+    // that older trades surfaced by the API are filtered before reaching the orchestrator.
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify([
+          makeTrade({ timestamp: 1700000300, transactionHash: "0xnew" }),
+          makeTrade({ timestamp: 1700000100, transactionHash: "0xold" }),
+        ]),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const conn = new PolymarketConnector();
+    // since = 1700000200 (seconds) → in milliseconds = 1700000200000
+    const result = await conn.fetchTransactions(
+      {
+        account: { id: "polymarket:0xabc", connectorId: "polymarket", label: "p", createdAt: 1 },
+        credentials: { proxyWallet: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12" },
+      },
+      1700000200 * 1000
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]!.txId).toContain("0xnew");
+    }
+  });
+
+  test("paginates via offset until short page", async () => {
+    // PAGE_SIZE = 100 in connector. We return a full page first (= 100 trades),
+    // then a short page (= 5 trades) to terminate. Total 105.
+    let calls = 0;
+    globalThis.fetch = (async (input: string | URL): Promise<Response> => {
+      calls++;
+      const url = input.toString();
+      const offset = parseInt(new URL(url).searchParams.get("offset") ?? "0", 10);
+      if (offset === 0) {
+        const page = Array.from({ length: 100 }, (_, i) =>
+          makeTrade({ timestamp: 1700000000 + i, transactionHash: `0x${i.toString(16)}` })
+        );
+        return new Response(JSON.stringify(page), { status: 200 });
+      }
+      // page 2: 5 entries → triggers "short page → stop" condition.
+      const page = Array.from({ length: 5 }, (_, i) =>
+        makeTrade({ timestamp: 1699000000 + i, transactionHash: `0xpage2_${i}` })
+      );
+      return new Response(JSON.stringify(page), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new PolymarketConnector();
+    const result = await conn.fetchTransactions({
+      account: { id: "polymarket:0xabc", connectorId: "polymarket", label: "p", createdAt: 1 },
+      credentials: { proxyWallet: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls).toBe(2);
+    if (result.ok) expect(result.value).toHaveLength(105);
+  });
+
+  test("HTTP 429 from /trades → rate_limited", async () => {
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response("slow down", { status: 429 });
+    }) as unknown as typeof fetch;
+
+    const conn = new PolymarketConnector();
+    const result = await conn.fetchTransactions({
+      account: { id: "polymarket:0xabc", connectorId: "polymarket", label: "p", createdAt: 1 },
+      credentials: { proxyWallet: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe("rate_limited");
   });
 });
 
