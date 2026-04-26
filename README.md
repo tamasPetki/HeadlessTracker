@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.7.0-burn-in. 3 connectors (Bybit, MetaMask multi-chain, Polymarket), 6 MCP tools, 99-test suite. Working end-to-end with Claude Desktop.
+**Status:** v0.7.1-burn-in. 3 connectors (Bybit, MetaMask multi-chain, Polymarket), 6 MCP tools, 110-test suite. Working end-to-end with Claude Desktop.
 
 ## What it does
 
@@ -80,8 +80,8 @@ If Claude doesn't see the tools, check `~/Library/Logs/Claude/mcp-server-headles
 | Connector | Auth | Status | Notes |
 |-----------|------|--------|-------|
 | Bybit V5 | API key + secret | ✓ Full | UNIFIED / SPOT / CONTRACT / FUND accounts. Read-only key. |
-| MetaMask / EVM wallets | Etherscan V2 API key | ✓ Full | Single key covers Ethereum, Polygon, BSC, Base, Arbitrum, Optimism. Native + bundled common ERC-20 tokens (USDC, USDT, WETH, WBTC, LINK, DAI). Custom token lists planned for v0.8. |
-| Polymarket | Proxy wallet address (no API key) | ✓ Positions | Uses public data-api. Transaction history endpoint discovery pending for v0.8. |
+| MetaMask / EVM wallets | Etherscan V2 API key | ✓ Full | Single key covers Ethereum, Polygon, BSC, Base, Arbitrum, Optimism. Native + bundled common ERC-20 tokens (USDC, USDT, WETH, WBTC, LINK, DAI) for balances; native + ERC-20 transfers for transactions. Custom token lists planned for v0.8. BSC/Base require Etherscan Pro on the free tier (auto-skipped with a warning otherwise). |
+| Polymarket | Proxy wallet address (no API key) | ✓ Full | Uses public data-api. Positions + BUY/SELL trade history (up to ~1000 most recent) via `/trades?user=PROXY`. |
 
 To add a new connector, implement `Connector` from `src/connectors/types.ts` and add it to `CONNECTOR_FACTORIES` in `src/mcp/orchestrator.ts`. ~150 lines of code per connector based on the existing three.
 
@@ -186,7 +186,7 @@ Yes — any MCP-compatible host works (Claude Code, Cursor, Codex, ZED, ChatGPT 
 Not yet. Open an issue or PR. The Connector interface is open for extension and the existing 3 connectors are reference implementations totaling ~600 lines.
 
 **What about transaction history for Polymarket?**
-The data-api `/trades?user=X` endpoint returns empty for all addresses I tested, including known whales. Identifying the correct endpoint or query parameter is on the v0.8 polish list. For now `get_transactions` returns `[]` for Polymarket accounts, with `coverage.polymarket = "not_implemented_in_v0"` in the response metadata so the LLM tells you honestly.
+Supported as of v0.7.1: `get_transactions` returns BUY/SELL trades from the public data-api `/trades?user=PROXY` endpoint, up to ~1000 most recent. The data-api ignores time-bound query params, so the `since` filter is enforced client-side; pagination terminates early once a page falls before the cutoff.
 
 **Why no UI?**
 Claude Desktop, ChatGPT, and Cursor all generate richer dashboards on demand than I'd ship in v1. Building a UI duplicates work the AI host already does better. If you want a hosted web UI, see [bulltrapp.com](https://bulltrapp.com).

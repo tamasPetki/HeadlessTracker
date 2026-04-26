@@ -95,10 +95,12 @@ class McpClient {
     return new Promise<JsonRpcResponse>((resolve, reject) => {
       this.pending.set(id, resolve);
       this.writeAndFlush(frame);
-      // 5s per-call timeout — generous since first call has Bun startup latency.
+      // 15s per-call timeout. Bun.spawn startup latency + occasional CPU-loaded
+      // contention when the whole suite runs in parallel makes 5s flaky; 15s is
+      // still tight enough to catch real hangs.
       setTimeout(() => {
         if (this.pending.delete(id)) reject(new Error(`Timeout waiting for response to ${method}`));
-      }, 5000);
+      }, 15000);
     });
   }
 
