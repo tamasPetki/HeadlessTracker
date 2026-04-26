@@ -16,7 +16,6 @@ const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, "cache.db");
 const DEFAULT_TTL_SEC: Record<ConnectorId, number> = {
   metamask: 60,
   bybit: 120,
-  ibkr: 300,
   polymarket: 30,
 };
 

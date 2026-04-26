@@ -12,21 +12,17 @@
 import { defaultAccountStore } from "../src/accounts.ts";
 import { BybitConnector } from "../src/connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask.ts";
+import { PolymarketConnector } from "../src/connectors/polymarket.ts";
 import type { Connector } from "../src/connectors/types.ts";
 import type { Account, ConnectorId } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
 
-const VERSION = "0.2.0-day2";
+const VERSION = "0.3.0-day3";
 
 const CONNECTORS: Record<ConnectorId, () => Connector> = {
   bybit: () => new BybitConnector(),
   metamask: () => new MetaMaskConnector(),
-  ibkr: () => {
-    throw new Error("IBKR connector not implemented yet (Day 3)");
-  },
-  polymarket: () => {
-    throw new Error("Polymarket connector not implemented yet (Day 4)");
-  },
+  polymarket: () => new PolymarketConnector(),
 };
 
 function printHelp(): void {
@@ -38,11 +34,12 @@ Usage:
   headless-tracker list-accounts          Show configured accounts (no secrets shown)
   headless-tracker help                   Show this help
 
-Connectors: bybit (V0.1), metamask (V0.2), ibkr (Day 3), polymarket (Day 4)
+Connectors: bybit, metamask, polymarket
 
 Setup examples:
   headless-tracker setup bybit
   headless-tracker setup metamask
+  headless-tracker setup polymarket
 
 claude_desktop_config.json snippet:
   {
@@ -219,9 +216,66 @@ async function setupMetaMask(): Promise<void> {
   console.log("  Test it: ask Claude Desktop \"what's in my MetaMask wallet?\"\n");
 }
 
+async function setupPolymarket(): Promise<void> {
+  console.log("\nPolymarket setup");
+  console.log("────────────────");
+  console.log("Find your Polymarket proxy wallet address:");
+  console.log("  1. Open https://polymarket.com → click your profile icon");
+  console.log("  2. Settings → Wallet → copy the address shown there");
+  console.log("  This is NOT your MetaMask address — it's a Polymarket-issued proxy.");
+  console.log("  No API key needed; the data-api is public.\n");
+
+  const proxyWallet = await readLine("Polymarket proxy wallet (0x...): ");
+  if (!/^0x[a-fA-F0-9]{40}$/.test(proxyWallet)) {
+    console.error("Invalid address format. Expected 0x + 40 hex chars.");
+    process.exit(1);
+  }
+
+  const sizeThresholdRaw = await readLine("Min position size to track (default 0.01, lower = more dust shown): ");
+  const sizeThreshold = sizeThresholdRaw ? parseFloat(sizeThresholdRaw) : 0.01;
+  if (Number.isNaN(sizeThreshold) || sizeThreshold < 0) {
+    console.error(`Invalid size threshold: ${sizeThresholdRaw}`);
+    process.exit(1);
+  }
+
+  const connector = new PolymarketConnector();
+  console.log("\nValidating address (probing data-api)...");
+  const validation = await connector.validateCredentials({ proxyWallet, sizeThreshold });
+  if (!validation.ok) {
+    console.error(`Validation failed: ${validation.error.message}`);
+    process.exit(1);
+  }
+
+  const accountIdentifier = proxyWallet.toLowerCase();
+
+  const vault = defaultVault();
+  const setResult = await vault.set("polymarket", accountIdentifier, {
+    proxyWallet,
+    sizeThreshold,
+  });
+  if (!setResult.ok) {
+    console.error(`Vault write failed: ${setResult.error.message}`);
+    process.exit(1);
+  }
+
+  const accounts = defaultAccountStore();
+  const labelShort = `${proxyWallet.slice(0, 6)}...${proxyWallet.slice(-4)}`;
+  const account: Account = {
+    id: `polymarket:${accountIdentifier}`,
+    connectorId: "polymarket",
+    label: `Polymarket ${labelShort}`,
+    createdAt: Date.now(),
+    metadata: { proxyWallet, sizeThreshold },
+  };
+  accounts.upsert(account);
+
+  console.log(`\n✓ Polymarket configured. Account ID: polymarket:${accountIdentifier}`);
+  console.log("  Test it: ask Claude Desktop \"show my Polymarket positions\"\n");
+}
+
 async function setup(connectorId: string | undefined): Promise<void> {
   if (!connectorId) {
-    console.log("Available connectors: bybit, metamask, ibkr (planned), polymarket (planned)");
+    console.log("Available connectors: bybit, metamask, polymarket");
     console.log("Usage: headless-tracker setup <connector>");
     process.exit(1);
   }
@@ -231,10 +285,8 @@ async function setup(connectorId: string | undefined): Promise<void> {
       return setupBybit();
     case "metamask":
       return setupMetaMask();
-    case "ibkr":
     case "polymarket":
-      console.error(`${connectorId} setup not implemented yet (planned: Day 3-4 of build)`);
-      process.exit(1);
+      return setupPolymarket();
     default:
       console.error(`Unknown connector: ${connectorId}`);
       process.exit(1);
@@ -271,7 +323,7 @@ async function listAccounts(): Promise<void> {
 
 async function startMcpServer(): Promise<void> {
   console.error("MCP server not implemented yet (planned: Day 5-7 of build).");
-  console.error("Day 1-2 deliverable is skeleton + Bybit + MetaMask connectors + setup CLI.");
+  console.error("Day 1-3 deliverable: skeleton + Bybit + MetaMask + Polymarket connectors + setup CLI.");
   console.error("Run `headless-tracker help` for available subcommands.");
   process.exit(1);
 }

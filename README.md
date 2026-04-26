@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building a beautiful tracker UI is wasted work. Build the data layer, let the AI host be the renderer.
 
-**Status:** Day 1 of 14. Skeleton only. Bybit connector first. MetaMask, IBKR, Polymarket follow.
+**Status:** Day 3 of 14. Three connectors implemented (Bybit, MetaMask multi-chain, Polymarket). MCP server still stubbed (Day 5-7).
 
 ## What it does
 
@@ -42,14 +42,13 @@ bunx headless-tracker setup
 - Cache is local SQLite (`bun:sqlite`). No server, no SaaS, no telemetry.
 - Read-only by design. No transaction signing. Nothing this tool can do can lose your money.
 
-## Supported integrations (planned)
+## Supported integrations
 
 | Connector | Status | Notes |
 |-----------|--------|-------|
-| Bybit (spot + perp + funding) | Day 1 (MVP) | First connector, validates the architecture |
-| MetaMask / EVM wallets | Day 2 | Etherscan + Polygon RPC + ERC-20 token list |
-| IBKR | Day 3 | Flex Query (REST may not cover all account types) |
-| Polymarket | Day 4 | Public REST + on-chain Polygon RPC fallback |
+| Bybit (V5 unified/spot/derivatives/fund) | ✓ Day 1 | API key + secret, HMAC via `bybit-api` SDK |
+| MetaMask / EVM wallets | ✓ Day 2 | Etherscan V2 multi-chain (ETH, Polygon, Base, Arbitrum, Optimism, BSC) — single API key |
+| Polymarket | ✓ Day 3 | Public data-api positions endpoint, no key needed |
 
 ## Architecture
 
@@ -61,7 +60,6 @@ bunx headless-tracker setup
               │  src/connectors/           │
               │    bybit.ts                │
               │    metamask.ts             │
-              │    ibkr.ts                 │
               │    polymarket.ts           │
               │  src/types.ts (schema)     │
               │  src/normalize.ts          │
