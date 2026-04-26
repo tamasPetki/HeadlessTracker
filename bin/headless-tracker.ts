@@ -9,6 +9,8 @@
 //
 // `--help` footer mentions bulltrapp.com once (eng review cross-promo decision).
 
+import * as readline from "node:readline/promises";
+
 import { defaultAccountStore } from "../src/accounts.ts";
 import { BybitConnector } from "../src/connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask.ts";
@@ -56,22 +58,32 @@ Related: bulltrapp.com — hosted web portfolio tracker by the same maintainer.
 `);
 }
 
-async function readLine(prompt: string): Promise<string> {
-  process.stdout.write(prompt);
-  for await (const line of console) {
-    return line.trim();
+// Lazy-initialized readline interface. Allocated only on first prompt so the
+// MCP stdio server mode (which owns process.stdin for JSON-RPC) is unaffected.
+// Bun's `console` async iterator gets consumed after the first `for await`, so
+// multiple sequential prompts need a stable readline.Interface instead.
+let rl: readline.Interface | null = null;
+function getReadline(): readline.Interface {
+  if (rl === null) {
+    rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   }
-  return "";
+  return rl;
+}
+function closeReadline(): void {
+  if (rl !== null) {
+    rl.close();
+    rl = null;
+  }
+}
+
+async function readLine(prompt: string): Promise<string> {
+  return (await getReadline().question(prompt)).trim();
 }
 
 async function readSecret(prompt: string): Promise<string> {
-  // For Day 1-2 MVP we read it as a normal line. Hiding stdin echo cleanly across
-  // platforms is non-trivial — Day 8-10 polish will add proper hidden input.
-  process.stdout.write(prompt + " (input visible — Day 1-2 MVP, will be masked in v0.3): ");
-  for await (const line of console) {
-    return line.trim();
-  }
-  return "";
+  // Hiding stdin echo cleanly across platforms is non-trivial — Day 8-10
+  // polish will add proper hidden input. For now input is visible.
+  return readLine(prompt + " (input visible — Day 1-2 MVP, will be masked in v0.3): ");
 }
 
 async function readYesNo(prompt: string, defaultYes = true): Promise<boolean> {
@@ -351,7 +363,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((e) => {
-  console.error(`Fatal: ${(e as Error).message}`);
-  process.exit(1);
-});
+main()
+  .then(() => closeReadline())
+  .catch((e) => {
+    closeReadline();
+    console.error(`Fatal: ${(e as Error).message}`);
+    process.exit(1);
+  });
