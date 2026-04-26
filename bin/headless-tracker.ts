@@ -205,11 +205,12 @@ async function setupMetaMask(): Promise<void> {
   const etherscanApiKey = await readSecret("Etherscan API key:");
 
   console.log("\nWhich chains do you want to track? (comma-separated chain IDs)");
-  console.log("  Available:");
+  console.log("  Available (★ = free Etherscan tier, $ = requires Etherscan Pro):");
   for (const [id, info] of Object.entries(SUPPORTED_CHAINS)) {
-    console.log(`    ${id.padStart(5, " ")}  ${info.name} (${info.nativeSymbol})`);
+    const tier = info.freeTier ? "★" : "$";
+    console.log(`    ${id.padStart(5, " ")}  ${tier}  ${info.name} (${info.nativeSymbol})`);
   }
-  const chainsRaw = await readLine("\nChain IDs (e.g. '1,137,8453' for ETH+Polygon+Base): ");
+  const chainsRaw = await readLine("\nChain IDs (e.g. '1,137,42161' for ETH+Polygon+Arbitrum): ");
   const chainIds = chainsRaw
     .split(",")
     .map((s) => parseInt(s.trim(), 10))
@@ -226,6 +227,17 @@ async function setupMetaMask(): Promise<void> {
     }
   }
 
+  // Ask about Etherscan Pro only if the user picked at least one paid-tier chain.
+  let hasEtherscanPro = false;
+  const paidChains = chainIds.filter((id) => !SUPPORTED_CHAINS[id as SupportedChainId].freeTier);
+  if (paidChains.length > 0) {
+    const names = paidChains.map((id) => SUPPORTED_CHAINS[id as SupportedChainId].name).join(", ");
+    console.log(`\nYou selected paid-tier chain(s): ${names}.`);
+    console.log("Etherscan free tier doesn't cover these. Without Pro they will be SOFT-SKIPPED");
+    console.log("at runtime (no error, but no data either — you'll see them in the warnings field).");
+    hasEtherscanPro = await readYesNo("Do you have an Etherscan Pro plan?", false);
+  }
+
   const trackCommonTokens = await readYesNo(
     "Track common ERC-20 tokens (USDC, USDT, WETH, WBTC, LINK, DAI per chain)?",
     true
@@ -238,6 +250,7 @@ async function setupMetaMask(): Promise<void> {
     etherscanApiKey,
     chainIds: chainIds as SupportedChainId[],
     trackCommonTokens,
+    hasEtherscanPro,
   });
   if (!validation.ok) {
     console.error(`Validation failed: ${validation.error.message}`);
@@ -253,6 +266,7 @@ async function setupMetaMask(): Promise<void> {
     etherscanApiKey,
     chainIds,
     trackCommonTokens,
+    hasEtherscanPro,
   });
   if (!setResult.ok) {
     console.error(`Vault write failed: ${setResult.error.message}`);
@@ -271,6 +285,7 @@ async function setupMetaMask(): Promise<void> {
       address,
       chainIds,
       trackCommonTokens,
+      hasEtherscanPro,
     },
   };
   accounts.upsert(account);

@@ -232,6 +232,37 @@ describe("Orchestrator", () => {
     expect(result.failures).toEqual([]);
   });
 
+  test("REGRESSION P1: getTransactions partial failure preserves successful connector data", async () => {
+    // From burn-in feedback: Tomi observed that get_transactions returned
+    // transactions:[] when MetaMask failed, even though Bybit should have
+    // returned its trades independently. This test pins the partial-failure
+    // semantics for getTransactions specifically.
+    setupAccount({ id: "bybit:UNIFIED", connectorId: "bybit", label: "B", createdAt: 1 });
+    setupAccount({ id: "metamask:0xabc", connectorId: "metamask", label: "M", createdAt: 2 });
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          transactionsResult: ok([
+            { accountId: "bybit:UNIFIED", txId: "t1", type: "trade", timestamp: 1700000000000 },
+            { accountId: "bybit:UNIFIED", txId: "t2", type: "trade", timestamp: 1700000001000 },
+          ]),
+        }),
+        metamask: new StubConnector({
+          id: "metamask",
+          transactionsResult: err("upstream_error", "All chains failed: free tier not supported"),
+        }),
+      },
+    });
+
+    const result = await orch.getTransactions(undefined, undefined);
+    expect(result.data).toHaveLength(2);                 // Bybit trades preserved
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]!.accountId).toBe("metamask:0xabc");
+  });
+
   test("refresh(connector) only invalidates that connector's cache", async () => {
     setupAccount({ id: "bybit:UNIFIED", connectorId: "bybit", label: "B", createdAt: 1 });
     setupAccount({ id: "metamask:0xabc", connectorId: "metamask", label: "M", createdAt: 2 });

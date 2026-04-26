@@ -67,9 +67,24 @@ describe("executeGetHoldings", () => {
   test("returns holdings from all accounts when no filter", async () => {
     const result = await executeGetHoldings({}, orch);
     expect(result.holdings).toHaveLength(4);
-    expect(result.meta.totalAccounts).toBe(3);
+    expect(result.meta.accountsConfigured).toBe(3);
+    expect(result.meta.accountsQueried).toBe(3);
     expect(result.meta.accountsWithErrors).toBe(0);
+    expect(result.meta.scope.accountIdFilter).toBeNull();
+    expect(result.meta.scope.assetClassFilter).toBeNull();
     expect(result.failures).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  test("meta.scope reflects active filter (P3 fix)", async () => {
+    const result = await executeGetHoldings(
+      { account_id: "bybit:UNIFIED", asset_class: "crypto" },
+      orch
+    );
+    expect(result.meta.accountsConfigured).toBe(3);    // total in registry
+    expect(result.meta.accountsQueried).toBe(1);       // narrowed by filter
+    expect(result.meta.scope.accountIdFilter).toBe("bybit:UNIFIED");
+    expect(result.meta.scope.assetClassFilter).toBe("crypto");
   });
 
   test("account_id filter scopes to one account", async () => {
@@ -91,6 +106,55 @@ describe("executeGetHoldings", () => {
     );
     expect(result.holdings).toHaveLength(2);
     expect(result.holdings.every((h) => h.assetClass === "crypto")).toBe(true);
+  });
+
+  test("REGRESSION P2: native multi-chain holding (POL) survives asset_class='crypto' filter", async () => {
+    // From burn-in feedback: Tomi observed POL appearing in unfiltered get_holdings
+    // but disappearing under (account_id + asset_class:crypto) filter. Possible cause:
+    // assetClass field not set consistently for native tokens vs ERC-20.
+    // This test pins the expected behavior for both native and ERC-20 holdings on
+    // multiple chains.
+    cache.close();
+    accountStore.close();
+    cache = new Cache({ dbPath: ":memory:" });
+    accountStore = new AccountStore({ dbPath: ":memory:" });
+    vault = new StubVault();
+    accountStore.upsert({ id: "metamask:0x9b73", connectorId: "metamask", label: "M", createdAt: 1 });
+    vault.set("metamask", "0x9b73", { address: "0x9b73" });
+
+    orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        metamask: new StubConnector({
+          id: "metamask",
+          holdingsResult: ok([
+            // Native ETH on Ethereum
+            makeHolding({ accountId: "metamask:0x9b73", symbol: "ETH", assetClass: "crypto", quantity: 1.5, metadata: { chainId: 1, chainName: "Ethereum", native: true } }),
+            // Native POL on Polygon
+            makeHolding({ accountId: "metamask:0x9b73", symbol: "POL", assetClass: "crypto", quantity: 100, metadata: { chainId: 137, chainName: "Polygon", native: true } }),
+            // ERC-20 USDC on Ethereum
+            makeHolding({ accountId: "metamask:0x9b73", symbol: "USDC", assetClass: "crypto", quantity: 500, value: 500, currentPrice: 1, metadata: { chainId: 1, contract: "0xabc" } }),
+          ]),
+        }),
+      },
+    });
+
+    // Unfiltered call: all 3 holdings should be present.
+    const unfiltered = await executeGetHoldings({}, orch);
+    expect(unfiltered.holdings).toHaveLength(3);
+    const symbols = unfiltered.holdings.map((h) => h.symbol).sort();
+    expect(symbols).toEqual(["ETH", "POL", "USDC"]);
+
+    // Account-scoped + asset_class:crypto: ALL 3 should still pass.
+    // POL must not be silently dropped because it lacks currentPrice/value.
+    const filtered = await executeGetHoldings(
+      { account_id: "metamask:0x9b73", asset_class: "crypto" },
+      orch
+    );
+    expect(filtered.holdings).toHaveLength(3);
+    const filteredSymbols = filtered.holdings.map((h) => h.symbol).sort();
+    expect(filteredSymbols).toEqual(["ETH", "POL", "USDC"]);
+    expect(filteredSymbols).toContain("POL");
   });
 
   test("returns ISO 8601 timestamps for fetchedAt (not epoch ms)", async () => {

@@ -19,17 +19,26 @@ import type { Connector, ConnectorContext, ConnectorCredentials } from "./types.
 import type { Holding, Result, Transaction } from "../types.ts";
 import { err, ok } from "../types.ts";
 
-// Supported chains for V0. Extend by adding entries here — no other code change needed.
+// Supported chains for V0.
+// `freeTier: true` means Etherscan V2's free API key works for that chain.
+// `freeTier: false` means a paid Etherscan API plan ("Pro") is required —
+// the connector will soft-skip these chains for free-tier users (with a warning
+// surfaced in the response) instead of returning a hard "All chains failed" error.
+// Verified empirically against the V2 API in 2026-04: BSC and Base require Pro.
 export const SUPPORTED_CHAINS = {
-  1: { name: "Ethereum", nativeSymbol: "ETH", nativeDecimals: 18 },
-  137: { name: "Polygon", nativeSymbol: "POL", nativeDecimals: 18 },
-  56: { name: "BNB Smart Chain", nativeSymbol: "BNB", nativeDecimals: 18 },
-  8453: { name: "Base", nativeSymbol: "ETH", nativeDecimals: 18 },
-  42161: { name: "Arbitrum One", nativeSymbol: "ETH", nativeDecimals: 18 },
-  10: { name: "Optimism", nativeSymbol: "ETH", nativeDecimals: 18 },
+  1: { name: "Ethereum", nativeSymbol: "ETH", nativeDecimals: 18, freeTier: true },
+  137: { name: "Polygon", nativeSymbol: "POL", nativeDecimals: 18, freeTier: true },
+  56: { name: "BNB Smart Chain", nativeSymbol: "BNB", nativeDecimals: 18, freeTier: false },
+  8453: { name: "Base", nativeSymbol: "ETH", nativeDecimals: 18, freeTier: false },
+  42161: { name: "Arbitrum One", nativeSymbol: "ETH", nativeDecimals: 18, freeTier: true },
+  10: { name: "Optimism", nativeSymbol: "ETH", nativeDecimals: 18, freeTier: true },
 } as const;
 
 export type SupportedChainId = keyof typeof SUPPORTED_CHAINS;
+
+// Marker error message — the Etherscan V2 API surfaces this verbatim when a free-tier
+// key hits a non-free-tier chain (e.g. BSC or Base). Used to soft-skip vs hard-fail.
+const FREE_TIER_BLOCKED_MARKER = "free api access is not supported";
 
 // Curated common token list per chain. Contracts are checksummed mainnet addresses.
 // V0.2 will expand this from a token-list source (Trustwallet, Coingecko verified).
@@ -72,6 +81,10 @@ interface MetaMaskCreds extends ConnectorCredentials {
   chainIds: SupportedChainId[];    // which chains to query
   trackCommonTokens: boolean;      // include the bundled COMMON_TOKENS list per chain
   customTokens?: Record<SupportedChainId, Array<{ contract: string; symbol: string; decimals: number }>>;
+  // If true, the user has confirmed they have an Etherscan Pro plan and wants
+  // BSC / Base / other paid-tier chains queried. Default false → those chains
+  // are soft-skipped with a warning instead of hard-failing.
+  hasEtherscanPro?: boolean;
 }
 
 function isMetaMaskCreds(c: ConnectorCredentials): c is MetaMaskCreds {
@@ -207,13 +220,26 @@ export class MetaMaskConnector implements Connector {
       return err("schema_mismatch", "MetaMask credentials malformed");
     }
     const creds = ctx.credentials;
-    const now = Date.now();
     const allHoldings: Holding[] = [];
     const chainErrors: string[] = [];
+    const skippedChains: string[] = [];     // soft-skipped (e.g. free tier blocked)
+
+    // Filter the user's selected chains down to "we will actually try this chain".
+    // Free-tier-blocked chains are skipped (with a warning) unless the user has
+    // explicitly opted into Pro tier.
+    const chainsToQuery: SupportedChainId[] = [];
+    for (const chainId of creds.chainIds) {
+      const info = SUPPORTED_CHAINS[chainId];
+      if (!info.freeTier && !creds.hasEtherscanPro) {
+        skippedChains.push(`${info.name} (chain ${chainId}) requires Etherscan Pro — set hasEtherscanPro:true in credentials to query it`);
+        continue;
+      }
+      chainsToQuery.push(chainId);
+    }
 
     // Per-chain fetch in parallel (eng review 4A: parallel fetch).
     const perChain = await Promise.all(
-      creds.chainIds.map(async (chainId): Promise<{ chainId: SupportedChainId; result: Result<Holding[]> }> => {
+      chainsToQuery.map(async (chainId): Promise<{ chainId: SupportedChainId; result: Result<Holding[]> }> => {
         const chainResult = await this.fetchChainHoldings(ctx, chainId);
         return { chainId, result: chainResult };
       })
@@ -221,16 +247,36 @@ export class MetaMaskConnector implements Connector {
 
     for (const { chainId, result } of perChain) {
       if (!result.ok) {
+        // Detect runtime free-tier-blocked even on chains we thought were OK
+        // (Etherscan can change tier coverage, or the user's key may be on a
+        // different plan than expected). Treat as a soft skip rather than hard fail.
+        if (result.error.message.toLowerCase().includes(FREE_TIER_BLOCKED_MARKER)) {
+          const info = SUPPORTED_CHAINS[chainId];
+          skippedChains.push(`${info.name} (chain ${chainId}) returned 'free tier not supported' at runtime — Etherscan key may not have access`);
+          continue;
+        }
         chainErrors.push(`chain ${chainId}: ${result.error.message}`);
         continue;
       }
       allHoldings.push(...result.value);
     }
 
-    // Partial success policy: if every chain failed, surface the first error.
-    // If at least one succeeded, return what we got + log the failures via metadata.
+    // Partial success policy: if at least one chain returned data, return it.
+    // Hard error only when EVERY queried chain failed AND nothing was soft-skipped.
+    // If everything was soft-skipped (e.g. user picked only paid-tier chains without
+    // hasEtherscanPro), return ok([]) with the warnings attached.
     if (allHoldings.length === 0 && chainErrors.length > 0) {
       return err("upstream_error", `All chains failed: ${chainErrors.join("; ")}`);
+    }
+
+    // Surface chain-level warnings via the first holding's metadata as a side-channel
+    // (the Holding[] result type can't carry top-level warnings cleanly without changing
+    // Result<T>). Callers that care can read `__chainWarnings` from the result; the
+    // orchestrator + tools layer will eventually surface this in tool meta.
+    if ((skippedChains.length > 0 || chainErrors.length > 0) && allHoldings.length > 0) {
+      const warnings = [...skippedChains, ...chainErrors];
+      const first = allHoldings[0]!;
+      first.metadata = { ...(first.metadata ?? {}), __chainWarnings: warnings };
     }
 
     return ok(allHoldings);
@@ -337,13 +383,25 @@ export class MetaMaskConnector implements Connector {
     const creds = ctx.credentials;
     const allTxs: Transaction[] = [];
     const chainErrors: string[] = [];
+    const skippedChains: string[] = [];
+
+    // Same free-tier filtering as fetchHoldings.
+    const chainsToQuery: SupportedChainId[] = [];
+    for (const chainId of creds.chainIds) {
+      const info = SUPPORTED_CHAINS[chainId];
+      if (!info.freeTier && !creds.hasEtherscanPro) {
+        skippedChains.push(`${info.name} (chain ${chainId}) requires Etherscan Pro`);
+        continue;
+      }
+      chainsToQuery.push(chainId);
+    }
 
     const startBlockApprox = since ? Math.max(0, Math.floor(since / 1000 / 13)) : 0;
     // ~13s avg block time on Ethereum, faster on L2s — coarse but Etherscan ignores
     // bad block numbers gracefully (returns empty if startBlock > tip).
 
     const perChain = await Promise.all(
-      creds.chainIds.map(async (chainId): Promise<{ chainId: SupportedChainId; result: Result<Transaction[]> }> => {
+      chainsToQuery.map(async (chainId): Promise<{ chainId: SupportedChainId; result: Result<Transaction[]> }> => {
         const chainResult = await this.fetchChainTransactions(ctx, chainId, startBlockApprox);
         return { chainId, result: chainResult };
       })
@@ -351,6 +409,11 @@ export class MetaMaskConnector implements Connector {
 
     for (const { chainId, result } of perChain) {
       if (!result.ok) {
+        if (result.error.message.toLowerCase().includes(FREE_TIER_BLOCKED_MARKER)) {
+          const info = SUPPORTED_CHAINS[chainId];
+          skippedChains.push(`${info.name} (chain ${chainId}) returned 'free tier not supported' at runtime`);
+          continue;
+        }
         chainErrors.push(`chain ${chainId}: ${result.error.message}`);
         continue;
       }
@@ -359,6 +422,12 @@ export class MetaMaskConnector implements Connector {
 
     if (allTxs.length === 0 && chainErrors.length > 0) {
       return err("upstream_error", `All chains failed: ${chainErrors.join("; ")}`);
+    }
+
+    if ((skippedChains.length > 0 || chainErrors.length > 0) && allTxs.length > 0) {
+      const warnings = [...skippedChains, ...chainErrors];
+      const first = allTxs[0]!;
+      first.metadata = { ...(first.metadata ?? {}), __chainWarnings: warnings };
     }
 
     return ok(allTxs);

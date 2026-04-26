@@ -174,6 +174,93 @@ describe("MetaMaskConnector.fetchHoldings (mocked Etherscan)", () => {
     }
   });
 
+  test("REGRESSION P2: free-tier chains (BSC, Base) are soft-skipped, free-tier chains still queried", async () => {
+    // From burn-in: Tomi got "All chains failed" for chains 56 (BSC) + 8453 (Base)
+    // because Etherscan V2 free tier doesn't cover them. Without this fix the
+    // entire connector failed even though chains 1, 137, 42161, 10 would have worked.
+    let ethCalls = 0;
+    let polygonCalls = 0;
+    let bscCalls = 0;
+    let baseCalls = 0;
+    globalThis.fetch = (async (input: string | URL): Promise<Response> => {
+      const url = input.toString();
+      if (url.includes("chainid=1&")) {
+        ethCalls++;
+        return new Response(JSON.stringify({ status: "1", message: "OK", result: "1000000000000000000" }), { status: 200 });
+      }
+      if (url.includes("chainid=137&")) {
+        polygonCalls++;
+        return new Response(JSON.stringify({ status: "1", message: "OK", result: "500000000000000000" }), { status: 200 });
+      }
+      if (url.includes("chainid=56&")) {
+        bscCalls++;
+        // Should never be called — BSC is non-free-tier and hasEtherscanPro=false default.
+        return new Response(JSON.stringify({ status: "0", message: "NOTOK", result: "Free API access is not supported for this chain" }), { status: 200 });
+      }
+      if (url.includes("chainid=8453&")) {
+        baseCalls++;
+        return new Response(JSON.stringify({ status: "0", message: "NOTOK", result: "Free API access is not supported for this chain" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ status: "1", message: "OK", result: "0" }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new MetaMaskConnector();
+    const result = await conn.fetchHoldings({
+      account: { id: "metamask:0xabc", connectorId: "metamask", label: "x", createdAt: 1 },
+      credentials: {
+        address: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12",
+        etherscanApiKey: "K",
+        chainIds: [1, 137, 56, 8453],
+        trackCommonTokens: false,
+        // hasEtherscanPro intentionally false — default behavior
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Should have ETH from chain 1 + POL from chain 137. BSC + Base soft-skipped.
+      expect(result.value).toHaveLength(2);
+      const symbols = result.value.map((h) => h.symbol).sort();
+      expect(symbols).toEqual(["ETH", "POL"]);
+      // Warnings should mention the skipped chains.
+      const warnings = (result.value[0]!.metadata?.__chainWarnings as string[] | undefined) ?? [];
+      expect(warnings.some((w) => w.includes("BNB Smart Chain"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Base"))).toBe(true);
+    }
+    // BSC and Base should never have been hit — they're filtered out before fetch.
+    expect(bscCalls).toBe(0);
+    expect(baseCalls).toBe(0);
+    expect(ethCalls).toBeGreaterThan(0);
+    expect(polygonCalls).toBeGreaterThan(0);
+  });
+
+  test("REGRESSION P2: hasEtherscanPro=true allows querying paid-tier chains", async () => {
+    let bscCalls = 0;
+    globalThis.fetch = (async (input: string | URL): Promise<Response> => {
+      const url = input.toString();
+      if (url.includes("chainid=56&")) {
+        bscCalls++;
+        return new Response(JSON.stringify({ status: "1", message: "OK", result: "1000000000000000000" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ status: "1", message: "OK", result: "0" }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new MetaMaskConnector();
+    const result = await conn.fetchHoldings({
+      account: { id: "metamask:0xabc", connectorId: "metamask", label: "x", createdAt: 1 },
+      credentials: {
+        address: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12",
+        etherscanApiKey: "K",
+        chainIds: [56],
+        trackCommonTokens: false,
+        hasEtherscanPro: true,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(bscCalls).toBe(1);
+  });
+
   test("HTTP 429 → rate_limited", async () => {
     globalThis.fetch = (async (): Promise<Response> => {
       return new Response("rate limited", { status: 429 });

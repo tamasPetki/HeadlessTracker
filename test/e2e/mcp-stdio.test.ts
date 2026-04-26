@@ -196,10 +196,14 @@ describe("E2E: MCP stdio server", () => {
     const parsed = JSON.parse(result.content[0]!.text);
     expect(parsed).toHaveProperty("holdings");
     expect(parsed).toHaveProperty("failures");
-    expect(parsed).toHaveProperty("meta.totalAccounts");
+    expect(parsed).toHaveProperty("warnings");
+    expect(parsed).toHaveProperty("meta.accountsConfigured");
+    expect(parsed).toHaveProperty("meta.accountsQueried");
+    expect(parsed).toHaveProperty("meta.scope.accountIdFilter");
     expect(parsed).toHaveProperty("meta.asOf");
     expect(Array.isArray(parsed.holdings)).toBe(true);
     expect(Array.isArray(parsed.failures)).toBe(true);
+    expect(Array.isArray(parsed.warnings)).toBe(true);
   });
 
   test("refresh_data with connector arg returns expected hint", async () => {

@@ -67,10 +67,20 @@ export interface GetTransactionsResult {
     metadata?: Record<string, unknown>;
   }>;
   failures: Array<{ accountId: string; error: string }>;
+  warnings: string[];           // per-chain soft-skips, etc.
   meta: {
     sinceResolved: string | null;     // ISO 8601 of the resolved cutoff
     sinceInputRaw: string | null;
     totalTransactions: number;
+    accountsConfigured: number;
+    accountsQueried: number;
+    accountsWithData: number;
+    accountsWithEmptyResults: number;     // succeeded but returned no transactions in window
+    accountsWithErrors: number;
+    scope: {
+      accountIdFilter: string | null;
+      sinceFilter: string | null;
+    };
     asOf: string;
     coverage: {
       polymarket: "not_implemented_in_v0";
@@ -107,25 +117,60 @@ export async function executeGetTransactions(
   // Sort newest-first across accounts.
   const sorted = [...aggregate.data].sort((a, b) => b.timestamp - a.timestamp);
 
+  // Drain per-connector chain warnings out of metadata side-channel.
+  const warnings: string[] = [];
+  for (const t of aggregate.data) {
+    const w = t.metadata?.__chainWarnings;
+    if (Array.isArray(w)) {
+      for (const msg of w) if (typeof msg === "string") warnings.push(msg);
+    }
+  }
+
+  const accountsConfigured = orchestrator.listAccounts().length;
+  const accountsQueried = accountIds ? accountIds.length : accountsConfigured;
+  const accountsWithDataSet = new Set(sorted.map((t) => t.accountId));
+  const accountsWithErrorsSet = new Set(aggregate.failures.map((f) => f.accountId));
+  const queriedAccountIds = new Set<string>(
+    accountIds ?? orchestrator.listAccounts().map((a) => a.id)
+  );
+  let accountsWithEmptyResults = 0;
+  for (const id of queriedAccountIds) {
+    if (accountsWithErrorsSet.has(id)) continue;
+    if (!accountsWithDataSet.has(id)) accountsWithEmptyResults++;
+  }
+
   return {
-    transactions: sorted.map((t: Transaction) => ({
-      accountId: t.accountId,
-      txId: t.txId,
-      type: t.type,
-      symbol: t.symbol,
-      quantity: t.quantity,
-      price: t.price,
-      fee: t.fee,
-      feeCurrency: t.feeCurrency,
-      valueCurrency: t.valueCurrency,
-      timestamp: new Date(t.timestamp).toISOString(),
-      metadata: t.metadata,
-    })),
+    transactions: sorted.map((t: Transaction) => {
+      const { __chainWarnings: _w, ...cleanMeta } = (t.metadata ?? {}) as Record<string, unknown>;
+      return {
+        accountId: t.accountId,
+        txId: t.txId,
+        type: t.type,
+        symbol: t.symbol,
+        quantity: t.quantity,
+        price: t.price,
+        fee: t.fee,
+        feeCurrency: t.feeCurrency,
+        valueCurrency: t.valueCurrency,
+        timestamp: new Date(t.timestamp).toISOString(),
+        metadata: Object.keys(cleanMeta).length > 0 ? cleanMeta : undefined,
+      };
+    }),
     failures: aggregate.failures,
+    warnings,
     meta: {
       sinceResolved: sinceMs ? new Date(sinceMs).toISOString() : null,
       sinceInputRaw: args.since ?? null,
       totalTransactions: sorted.length,
+      accountsConfigured,
+      accountsQueried,
+      accountsWithData: accountsWithDataSet.size,
+      accountsWithEmptyResults,
+      accountsWithErrors: aggregate.failures.length,
+      scope: {
+        accountIdFilter: args.account_id ?? null,
+        sinceFilter: args.since ?? null,
+      },
       asOf: new Date().toISOString(),
       coverage: {
         polymarket: "not_implemented_in_v0",

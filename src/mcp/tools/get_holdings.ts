@@ -62,10 +62,17 @@ export interface GetHoldingsResult {
     accountId: string;
     error: string;
   }>;
+  warnings: string[];           // per-chain soft-skips, etc. (e.g. "BSC requires Etherscan Pro")
   meta: {
-    totalAccounts: number;
-    accountsWithData: number;
+    accountsConfigured: number;     // total accounts in the registry (independent of filter)
+    accountsQueried: number;        // accounts the request actually targeted (= 1 if account_id filter, else accountsConfigured)
+    accountsWithData: number;       // queried accounts that returned at least one matching holding
+    accountsWithEmptyResults: number; // queried accounts that returned ok but no matching holdings (vs errors)
     accountsWithErrors: number;
+    scope: {                        // explicit filter context, so "0 results" is interpretable
+      accountIdFilter: string | null;
+      assetClassFilter: string | null;
+    };
     asOf: string;
   };
 }
@@ -81,26 +88,66 @@ export async function executeGetHoldings(
     ? aggregate.data.filter((h) => h.assetClass === args.asset_class)
     : aggregate.data;
 
+  // Drain per-connector warnings that connectors stash in metadata.__chainWarnings
+  // as a side-channel (Result<T> can't carry top-level warnings without changing
+  // the Connector interface). The orchestrator has full visibility into all the
+  // raw Holdings returned (not just filtered ones), so we read warnings from
+  // aggregate.data, not filtered.
+  const warnings: string[] = [];
+  for (const h of aggregate.data) {
+    const w = h.metadata?.__chainWarnings;
+    if (Array.isArray(w)) {
+      for (const msg of w) if (typeof msg === "string") warnings.push(msg);
+    }
+  }
+
+  const accountsConfigured = orchestrator.listAccounts().length;
+  const accountsQueried = accountIds ? accountIds.length : accountsConfigured;
   const accountsWithData = new Set(filtered.map((h) => h.accountId)).size;
 
+  // "Empty result" = the orchestrator returned ok([]) for that account but no
+  // holding matched the filter (or the connector returned no holdings at all).
+  const queriedAccountIds = new Set<string>(
+    accountIds ?? orchestrator.listAccounts().map((a) => a.id)
+  );
+  const accountsWithErrorsSet = new Set(aggregate.failures.map((f) => f.accountId));
+  const accountsWithDataSet = new Set(filtered.map((h) => h.accountId));
+  let accountsWithEmptyResults = 0;
+  for (const id of queriedAccountIds) {
+    if (accountsWithErrorsSet.has(id)) continue;
+    if (!accountsWithDataSet.has(id)) accountsWithEmptyResults++;
+  }
+
   return {
-    holdings: filtered.map((h) => ({
-      accountId: h.accountId,
-      symbol: h.symbol,
-      assetClass: h.assetClass,
-      quantity: h.quantity,
-      avgCost: h.avgCost,
-      currentPrice: h.currentPrice,
-      value: h.value,
-      valueCurrency: h.valueCurrency,
-      metadata: h.metadata,
-      fetchedAt: new Date(h.fetchedAt).toISOString(),
-    })),
+    holdings: filtered.map((h) => {
+      // Strip __chainWarnings from outgoing metadata — they're surfaced in the
+      // top-level `warnings` field, no need to leak the side-channel marker.
+      const { __chainWarnings: _w, ...cleanMeta } = (h.metadata ?? {}) as Record<string, unknown>;
+      return {
+        accountId: h.accountId,
+        symbol: h.symbol,
+        assetClass: h.assetClass,
+        quantity: h.quantity,
+        avgCost: h.avgCost,
+        currentPrice: h.currentPrice,
+        value: h.value,
+        valueCurrency: h.valueCurrency,
+        metadata: Object.keys(cleanMeta).length > 0 ? cleanMeta : undefined,
+        fetchedAt: new Date(h.fetchedAt).toISOString(),
+      };
+    }),
     failures: aggregate.failures,
+    warnings,
     meta: {
-      totalAccounts: orchestrator.listAccounts().length,
+      accountsConfigured,
+      accountsQueried,
       accountsWithData,
+      accountsWithEmptyResults,
       accountsWithErrors: aggregate.failures.length,
+      scope: {
+        accountIdFilter: args.account_id ?? null,
+        assetClassFilter: args.asset_class ?? null,
+      },
       asOf: new Date().toISOString(),
     },
   };
