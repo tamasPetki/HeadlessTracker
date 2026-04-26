@@ -14,10 +14,11 @@ import { BybitConnector } from "../src/connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask.ts";
 import { PolymarketConnector } from "../src/connectors/polymarket.ts";
 import type { Connector } from "../src/connectors/types.ts";
+import { runStdioServer } from "../src/mcp/server.ts";
 import type { Account, ConnectorId } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
 
-const VERSION = "0.3.0-day3";
+const VERSION = "0.5.0-day5";
 
 const CONNECTORS: Record<ConnectorId, () => Connector> = {
   bybit: () => new BybitConnector(),
@@ -322,10 +323,9 @@ async function listAccounts(): Promise<void> {
 }
 
 async function startMcpServer(): Promise<void> {
-  console.error("MCP server not implemented yet (planned: Day 5-7 of build).");
-  console.error("Day 1-3 deliverable: skeleton + Bybit + MetaMask + Polymarket connectors + setup CLI.");
-  console.error("Run `headless-tracker help` for available subcommands.");
-  process.exit(1);
+  // Stdio MCP server. All logging goes to stderr (stdout is reserved for the
+  // JSON-RPC framing that the host parses).
+  await runStdioServer();
 }
 
 async function main(): Promise<void> {
