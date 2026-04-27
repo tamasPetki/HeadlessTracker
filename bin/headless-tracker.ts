@@ -16,6 +16,9 @@ import { BybitConnector } from "../src/connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask.ts";
 import { PolymarketConnector } from "../src/connectors/polymarket.ts";
 import { runStdioServer } from "../src/mcp/server.ts";
+import { executeGetHoldings } from "../src/mcp/tools/get_holdings.ts";
+import { executeGetPnl } from "../src/mcp/tools/get_pnl.ts";
+import { executeGetTransactions } from "../src/mcp/tools/get_transactions.ts";
 import type { Account } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
 
@@ -28,6 +31,9 @@ Usage:
   headless-tracker                        Start the MCP stdio server (use this in claude_desktop_config.json)
   headless-tracker setup [connector]      Configure credentials for a connector (interactive)
   headless-tracker list-accounts          Show configured accounts (no secrets shown)
+  headless-tracker show holdings [...]    Print current holdings (text table, no Claude required)
+  headless-tracker show pnl [...]         Print aggregate P&L
+  headless-tracker show transactions [..] Print transaction history
   headless-tracker help                   Show this help
 
 Connectors: bybit, metamask, polymarket
@@ -36,6 +42,14 @@ Setup examples:
   headless-tracker setup bybit
   headless-tracker setup metamask
   headless-tracker setup polymarket
+
+Show examples:
+  headless-tracker show holdings
+  headless-tracker show holdings --account-id=bybit:UNIFIED
+  headless-tracker show holdings --asset-class=crypto
+  headless-tracker show pnl
+  headless-tracker show transactions --since=7d
+  headless-tracker show transactions --account-id=metamask:0xabc --since=24h
 
 claude_desktop_config.json snippet:
   {
@@ -406,6 +420,190 @@ async function startMcpServer(): Promise<void> {
   await runStdioServer();
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// `show` subcommands — emit human-readable text tables, NOT JSON. The MCP server
+// path returns structured JSON for the LLM. CLI users get readable terminal output.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Parses `--key=value` and `--key value` flags from a positional arg list.
+// Unknown flags are ignored (each show command picks the ones it cares about).
+function parseFlags(args: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (!a.startsWith("--")) continue;
+    const eq = a.indexOf("=");
+    if (eq > 0) {
+      out[a.slice(2, eq)] = a.slice(eq + 1);
+    } else {
+      const next = args[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        out[a.slice(2)] = next;
+        i++;
+      } else {
+        out[a.slice(2)] = "true";
+      }
+    }
+  }
+  return out;
+}
+
+// Renders a fixed-width text table. No external lib — keeps install lean.
+// rows = array of arrays of strings (already stringified). headers same length as each row.
+function renderTable(headers: string[], rows: string[][]): string {
+  if (rows.length === 0) return "";
+  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)));
+  const formatRow = (cells: string[]): string =>
+    cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
+  const sep = widths.map((w) => "─".repeat(w)).join("  ");
+  return [formatRow(headers), sep, ...rows.map(formatRow)].join("\n");
+}
+
+function fmtUsd(n: number | undefined): string {
+  if (n === undefined || !Number.isFinite(n)) return "—";
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (abs >= 1000) return `${sign}$${abs.toFixed(0)}`;
+  if (abs >= 1) return `${sign}$${abs.toFixed(2)}`;
+  return `${sign}$${abs.toFixed(4)}`;
+}
+
+function fmtQty(n: number | undefined): string {
+  if (n === undefined || !Number.isFinite(n)) return "—";
+  if (Math.abs(n) >= 1000) return n.toFixed(2);
+  if (Math.abs(n) >= 1) return n.toFixed(4);
+  return n.toPrecision(6);
+}
+
+async function showHoldings(args: string[]): Promise<void> {
+  const flags = parseFlags(args);
+  const result = await executeGetHoldings({
+    account_id: flags["account-id"],
+    asset_class: flags["asset-class"] as "crypto" | "stock" | "prediction" | "cash" | undefined,
+  });
+
+  if (result.holdings.length === 0) {
+    console.log("No holdings found.");
+    if (result.meta.accountsConfigured === 0) {
+      console.log("(No accounts configured. Run `headless-tracker setup <connector>` first.)");
+    } else if (result.failures.length > 0) {
+      console.log(`(${result.failures.length} account(s) failed to fetch — see below.)`);
+    }
+  } else {
+    const rows = result.holdings.map((h) => [
+      h.accountId,
+      h.symbol,
+      h.assetClass,
+      fmtQty(h.quantity),
+      fmtUsd(h.value),
+      h.currentPrice !== undefined ? fmtUsd(h.currentPrice) : "—",
+    ]);
+    console.log(renderTable(["account", "symbol", "class", "qty", "value", "price"], rows));
+    const total = result.holdings.reduce((s, h) => s + (h.value ?? 0), 0);
+    console.log(`\nTotal: ${fmtUsd(total)}  (${result.holdings.length} positions across ${result.meta.accountsWithData} accounts)`);
+  }
+
+  if (result.warnings.length > 0) {
+    console.log("\nWarnings:");
+    for (const w of result.warnings) console.log(`  - ${w}`);
+  }
+  if (result.failures.length > 0) {
+    console.log("\nFailures:");
+    for (const f of result.failures) console.log(`  - ${f.accountId}: ${f.error}`);
+  }
+}
+
+async function showPnl(args: string[]): Promise<void> {
+  const flags = parseFlags(args);
+  const tf = flags["timeframe"];
+  const validTf = tf === "24h" || tf === "7d" || tf === "30d" || tf === "ytd" || tf === "all" ? tf : undefined;
+  const result = await executeGetPnl({
+    account_id: flags["account-id"],
+    timeframe: validTf,
+  });
+
+  if (result.byAccount.length === 0) {
+    console.log("No P&L data — no holdings yet.");
+    return;
+  }
+
+  const rows = result.byAccount.map((a) => [
+    a.accountId,
+    fmtUsd(a.currentValue),
+    a.costBasis !== null ? fmtUsd(a.costBasis) : "—",
+    a.unrealizedPnl !== null ? fmtUsd(a.unrealizedPnl) : "—",
+    a.realizedPnl !== null ? fmtUsd(a.realizedPnl) : "—",
+  ]);
+  console.log(renderTable(["account", "value", "cost basis", "unrealized", "realized"], rows));
+  console.log(`\nTotals:`);
+  console.log(`  current value:  ${fmtUsd(result.total.currentValue)}`);
+  console.log(`  cost basis:     ${fmtUsd(result.total.costBasis)}`);
+  console.log(`  unrealized PnL: ${fmtUsd(result.total.unrealizedPnl)}`);
+  console.log(`  realized PnL:   ${fmtUsd(result.total.realizedPnl)}`);
+  console.log(`\n${result.timeframeNote}`);
+  // Surface per-account notes (e.g. "MetaMask doesn't track cost basis").
+  const allNotes = new Set<string>();
+  for (const a of result.byAccount) for (const n of a.notes) allNotes.add(n);
+  if (allNotes.size > 0) {
+    console.log("\nNotes:");
+    for (const n of allNotes) console.log(`  - ${n}`);
+  }
+}
+
+async function showTransactions(args: string[]): Promise<void> {
+  const flags = parseFlags(args);
+  const result = await executeGetTransactions({
+    account_id: flags["account-id"],
+    since: flags["since"],
+  });
+
+  if (result.transactions.length === 0) {
+    console.log("No transactions in the requested window.");
+    if (result.meta.accountsWithEmptyResults > 0) {
+      console.log(`(${result.meta.accountsWithEmptyResults} account(s) returned 0 — try a longer --since.)`);
+    }
+    return;
+  }
+
+  const rows = result.transactions.slice(0, 50).map((t) => [
+    t.timestamp.slice(0, 19).replace("T", " "),
+    t.accountId,
+    t.type,
+    t.symbol ?? "—",
+    fmtQty(t.quantity),
+    t.price !== undefined ? fmtUsd(t.price) : "—",
+    t.fee !== undefined ? `${fmtQty(t.fee)} ${t.feeCurrency ?? ""}`.trim() : "—",
+  ]);
+  console.log(renderTable(["timestamp (UTC)", "account", "type", "symbol", "qty", "price", "fee"], rows));
+  console.log(`\nShowing ${rows.length} of ${result.meta.totalTransactions} transactions${result.meta.sinceResolved ? ` since ${result.meta.sinceResolved.slice(0, 10)}` : ""}.`);
+
+  if (result.warnings.length > 0) {
+    console.log("\nWarnings:");
+    for (const w of result.warnings) console.log(`  - ${w}`);
+  }
+}
+
+async function show(thing: string | undefined, rest: string[]): Promise<void> {
+  switch (thing) {
+    case "holdings":
+      return showHoldings(rest);
+    case "pnl":
+      return showPnl(rest);
+    case "transactions":
+    case "tx":
+      return showTransactions(rest);
+    default:
+      console.log("Usage: headless-tracker show <holdings|pnl|transactions> [flags...]");
+      console.log("");
+      console.log("Examples:");
+      console.log("  headless-tracker show holdings");
+      console.log("  headless-tracker show holdings --account-id=bybit:UNIFIED");
+      console.log("  headless-tracker show pnl");
+      console.log("  headless-tracker show transactions --since=7d");
+      if (thing) process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const cmd = args[0];
@@ -422,6 +620,8 @@ async function main(): Promise<void> {
       return setup(args[1]);
     case "list-accounts":
       return listAccounts();
+    case "show":
+      return show(args[1], args.slice(2));
     default:
       console.error(`Unknown command: ${cmd}`);
       printHelp();
