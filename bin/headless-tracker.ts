@@ -27,7 +27,7 @@ import { executeGetTransactions } from "../src/mcp/tools/get_transactions.ts";
 import type { Account } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
 
-const VERSION = "0.7.1-burn-in";
+const VERSION = "0.8.0";
 
 function printHelp(): void {
   console.log(`headless-tracker v${VERSION}

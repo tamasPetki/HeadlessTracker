@@ -17,20 +17,21 @@ The original 14-day plan plus the first burn-in round.
 - **Burn-in fix #2:** `meta.scope` + per-account empty/error counts so the LLM can distinguish "0 results" from silent failure.
 - **Coverage caveats closed:** MetaMask ERC-20 transfers (`tokentx`) and Polymarket BUY/SELL trades (`/trades?user=PROXY`) — both flipped from "Day 8-10 polish" to shipped.
 
-## v0.7.x — Open (deferred from burn-in round 1)
+## v0.8.0 — Done (Apr 2026)
 
-- **Pricing snapshot consistency** between `get_pnl` and `get_allocations`. Currently each tool computes value off whatever the connector returned at fetch time, so within a single conversation the numbers can diverge if the cache TTL crosses between tool calls. Fix needs a request-scoped price snapshot (one read, both tools share). Refactor-shaped, not bug-shaped.
+5 capability commits + release-prep. 162 tests, typecheck clean. Capability scope set by /autoplan review (premise gate option B): promote distribution + CLI from Phase 2+ to v0.8. See the Decision Audit Trail below for every choice the review made.
 
-## v0.8 — Next priorities
+- **CLI portfolio queries** (commit `607da9a`): `show holdings | pnl | transactions [--account-id=X] [--asset-class=Y] [--since=7d]`. Reuses the same orchestrator the MCP server uses; presentation layer is a text table. Unlocks the "mennyi a portfoliom?" 3-second answer without opening Claude Desktop.
+- **Custom ERC-20 token list** (commit `057baf2`): `token add | list | remove`. Stored in `Account.metadata.customTokens`, NOT the keychain (tokens are public on-chain identifiers). Orchestrator merges them into connector credentials at fetch time.
+- **FIFO cost basis tracker** (commit `c259a3a`): new `src/cost_basis.ts` module + `get_pnl --include-history`. Honest cost basis is the design point: tokens received via wallet transfer-in have no known price; lots get `costBasisKnown=false`; any SELL consuming them produces `realizedPnl: null` — NOT $0, NOT NaN. The /autoplan TC10 critical regression is pinned in tests.
+- **Polymarket realized P&L from `/trades`** (commit `75d1126`): replaces the `cashPnl` mixed metric. Default mode → Polymarket realized = null with a note pointing to `include_history=true`. With history, FIFO over /trades gives the canonical number.
+- **Multi-wallet per MetaMask account** (commit `def9e1d`): additive `addresses?: string[]` schema. Legacy single-`address` vaults auto-upgrade at runtime (1-element list). Connector fans out per-(address × chain). Setup CLI still single-wallet for back-compat.
+- **Side fix:** `bun test --timeout 15000` → `--timeout=15000` in package.json. The space-form was silently ignored; E2E flakiness "fix" only properly activated with the `=` form.
 
-User-facing capability additions, ordered by likely value to Tomi:
+## v0.8.x — Open (deferred from earlier rounds)
 
-1. **Ship public** (was deferred to v1). GitHub repo public, NPM_TOKEN secret, `git tag v0.8.0`, awesome-MCP PR. Reason for promotion: "open source as serendipity strategy" generates 0 signal until the repo is publicly findable. Every day this is deferred is dormant.
-2. **CLI binary** (was Phase 2+). `headless-tracker show holdings`, `... show pnl`, `... show transactions --since=7d` for the 3-second "mennyi a portfoliom?" question without opening Claude Desktop. Reuses the existing `executeGetHoldings` / `executeGetPnl` etc. — same orchestrator, different presentation layer (text table instead of MCP JSON).
-3. **Custom ERC-20 token list per chain.** Currently the bundled list is `USDC, USDT, WETH, WBTC, LINK, DAI` (chain-dependent). Add `headless-tracker token add <chain> <contract> <symbol> <decimals>` so the user can track project tokens. Source: `src/connectors/metamask.ts:11-15` "V0.2 scope".
-4. **MetaMask cost-basis from transaction history.** `get_pnl.ts` notes today: "MetaMask connector does not yet track cost basis (V0 limitation)." With ERC-20 transfers now in scope, FIFO cost basis becomes feasible per token per chain. **Caveat: on-chain history only — does NOT account for tokens bought on Bybit (or any CEX) and transferred to MetaMask. Cross-venue cost basis stays Phase 2+.** Unlocks honest unrealized P&L for tokens born on-chain (LP rewards, swaps, native airdrops).
-5. **Polymarket realized P&L from `/trades`.** The trade history we now collect lets us compute true realized P&L (sum of SELL price × size minus BUY cost) instead of falling back to the connector's own `cashPnl` field. Removes the "cashPnl combines realized + unrealized" caveat in `get_pnl`.
-6. **Multiple wallets per MetaMask account.** Currently one address per Account row. Lift to a list once a real "I have a hot wallet and a cold wallet" use case shows up.
+- **Pricing snapshot consistency** between `get_pnl` and `get_allocations`. Each tool computes value off whatever the connector returned at fetch time; within a single conversation the numbers can diverge if the cache TTL crosses between tool calls. Fix needs a request-scoped price snapshot (one read, both tools share). Refactor-shaped, not bug-shaped. Carried over from v0.7 burn-in.
+- **Ship public** (the only v0.8 item not yet executed because it's a user-side action): GitHub repo public, NPM_TOKEN secret, `git tag v0.8.0`, awesome-MCP PR. Until this happens, the "open source as serendipity strategy" produces 0 signal.
 
 ## v1 — Stable release horizon
 
@@ -57,7 +58,20 @@ These are not blocked by v1; they unblock if there's external demand or a concre
 
 ## How items get promoted
 
-A v0.8 item moves up if **(a)** Tomi hits it during real Claude Desktop use, or **(b)** an external issue/PR shows the same gap. Pure speculation stays in Phase 2.
+A backlog item moves up if **(a)** Tomi hits it during real Claude Desktop use, or **(b)** an external issue/PR shows the same gap. Pure speculation stays in Phase 2.
+
+## Round 2 burn-in checklist (post v0.8.0 ship)
+
+Before considering v0.8 closed, re-run these against Claude Desktop with the v0.8 build:
+
+- [ ] `What's in my portfolio?` — verify warnings field surfaces any soft-skipped chains, multi-wallet metadata.address differentiates wallets if multi.
+- [ ] `Show my recent transactions from the last 24h.` — verify `meta.accountsWithEmptyResults` distinguishes "0 trades" from silent fail (burn-in fix #2).
+- [ ] `Show holdings filtered to my MetaMask wallet, only crypto.` — verify POL + native + ERC-20 + custom tokens all present (P2-POL regression).
+- [ ] `How am I doing? Include history.` — verify `get_pnl` with `include_history=true` returns FIFO realized for Polymarket and surfaces `unknownSalesCount` for MetaMask deposits.
+- [ ] CLI smoke: `bun run bin/headless-tracker.ts show holdings`, `... show pnl --include-history=true`, `... show transactions --since=7d`.
+- [ ] Token CLI: `token add` a project token you actually hold, `show holdings`, verify it shows up.
+- [ ] Tarball check: `npm pack --dry-run`, inspect file list — no `.env`, no `cache.db`, no secrets, no node_modules (FM-E1).
+- [ ] First-time install on a clean macOS user account or Docker container — TTHW < 5 min target (DX scorecard goal).
 
 <!-- AUTONOMOUS DECISION LOG -->
 ## Decision Audit Trail (autoplan run 2026-04-27)

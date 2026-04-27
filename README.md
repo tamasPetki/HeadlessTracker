@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.7.1-burn-in. 3 connectors (Bybit, MetaMask multi-chain, Polymarket), 6 MCP tools, 110-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** v0.8.0. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 6 MCP tools, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO cost-basis on transaction history, 162-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -75,12 +75,44 @@ Open a new conversation in Claude Desktop:
 
 If Claude doesn't see the tools, check `~/Library/Logs/Claude/mcp-server-headless-tracker.log`.
 
+## Quick portfolio queries from the CLI (no Claude required)
+
+For the 3-second "what's in my portfolio?" question without opening Claude Desktop:
+
+```bash
+bun run bin/headless-tracker.ts show holdings
+bun run bin/headless-tracker.ts show pnl
+bun run bin/headless-tracker.ts show transactions --since=7d
+```
+
+Each prints a text table. Filters work: `show holdings --account-id=bybit:UNIFIED`, `show holdings --asset-class=crypto`, `show transactions --since=24h --account-id=metamask:0xabc`.
+
+For honest realized P&L based on FIFO over your transaction history (not connector metadata which can mix realized + unrealized for prediction markets):
+
+```bash
+bun run bin/headless-tracker.ts show pnl --include-history=true
+```
+
+This pulls trades and runs a FIFO cost-basis ledger. Tokens received via wallet transfer-in (no price) get `unknownSalesCount`, NOT inflated into the realized number — explicit honesty about what cost basis we actually know.
+
+## Custom ERC-20 tokens
+
+The bundled MetaMask token list covers `USDC, USDT, WETH, WBTC, LINK, DAI`. To track project-specific tokens:
+
+```bash
+bun run bin/headless-tracker.ts token add metamask:0xabc 1 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 USDC 6
+bun run bin/headless-tracker.ts token list
+bun run bin/headless-tracker.ts token remove metamask:0xabc 1 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+```
+
+Custom tokens are stored per-account in the SQLite account store (NOT the keychain — they're public on-chain identifiers, not secrets).
+
 ## Supported integrations
 
 | Connector | Auth | Status | Notes |
 |-----------|------|--------|-------|
 | Bybit V5 | API key + secret | ✓ Full | UNIFIED / SPOT / CONTRACT / FUND accounts. Read-only key. |
-| MetaMask / EVM wallets | Etherscan V2 API key | ✓ Full | Single key covers Ethereum, Polygon, BSC, Base, Arbitrum, Optimism. Native + bundled common ERC-20 tokens (USDC, USDT, WETH, WBTC, LINK, DAI) for balances; native + ERC-20 transfers for transactions. Custom token lists planned for v0.8. BSC/Base require Etherscan Pro on the free tier (auto-skipped with a warning otherwise). |
+| MetaMask / EVM wallets | Etherscan V2 API key | ✓ Full | Single key covers Ethereum, Polygon, BSC, Base, Arbitrum, Optimism. Native + bundled common ERC-20 tokens (USDC, USDT, WETH, WBTC, LINK, DAI) for balances; native + ERC-20 transfers for transactions. Custom token lists via `headless-tracker token add ...`. Multi-wallet per account (one Etherscan key, multiple addresses). BSC/Base require Etherscan Pro on the free tier (auto-skipped with a warning otherwise). |
 | Polymarket | Proxy wallet address (no API key) | ✓ Full | Uses public data-api. Positions + BUY/SELL trade history (up to ~1000 most recent) via `/trades?user=PROXY`. |
 
 To add a new connector, implement `Connector` from `src/connectors/types.ts` and add it to `CONNECTOR_FACTORIES` in `src/mcp/orchestrator.ts`. ~150 lines of code per connector based on the existing three.
@@ -180,7 +212,13 @@ Verify the API key has Wallet Read + Trade Read permissions (NO Withdraw needed)
 The free tier is 5 calls/sec, 100k/day. Each MetaMask refresh costs (1 + N tokens) calls per chain. If you have 4 chains × 7 common tokens, that's 32 calls per refresh. Spread your refresh requests; the cache TTL (60s for MetaMask) is there for a reason.
 
 **Can I use this without Claude Desktop?**
-Yes — any MCP-compatible host works (Claude Code, Cursor, Codex, ZED, ChatGPT once their MCP support stabilizes). Wire it the same way; just change which client config file you edit.
+Yes — any MCP-compatible host works (Claude Code, Cursor, Codex, ZED, ChatGPT once their MCP support stabilizes). Wire it the same way; just change which client config file you edit. There's also a CLI (`headless-tracker show holdings/pnl/transactions`) for terminal queries that don't need an AI host at all.
+
+**Realized P&L looks wrong.**
+For Polymarket, default `get_pnl` returns `realizedPnl: null` because the connector's `cashPnl` field mixes realized + unrealized. Pass `include_history=true` (or `--include-history=true` from the CLI) to get the honest number computed from FIFO over your `/trades` history. For MetaMask, on-chain transfer-in tokens have no known cost basis — `include_history=true` reports them as `unknownSalesCount` instead of fabricating $0.
+
+**Can one MetaMask account track multiple wallets?**
+Yes. v0.8 added `addresses[]` to MetaMask credentials. The setup CLI still asks for one wallet (back-compat), but the connector accepts a list. Edit the vault entry directly to add more addresses to the same account, sharing the same Etherscan key + chain selection. A `wallet add` CLI command is on the v0.9 list if there's demand.
 
 **Does this support [my favorite exchange / chain / market]?**
 Not yet. Open an issue or PR. The Connector interface is open for extension and the existing 3 connectors are reference implementations totaling ~600 lines.
