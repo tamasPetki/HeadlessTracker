@@ -105,4 +105,59 @@ describe("executeGetPnl", () => {
     expect(result.total.currentValue).toBe(1500);
     expect(result.total.costBasis).toBe(800);              // only bybit had cost
   });
+
+  test("include_history=true populates realizedFromHistory via FIFO cost basis", async () => {
+    // BUY 100 @ 1.0, SELL 50 @ 1.05 → realized 2.50.
+    setupAccount("bybit:UNIFIED", "bybit");
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "USDC", quantity: 50, value: 50, currentPrice: 1, avgCost: 1 })]),
+          transactionsResult: ok([
+            { accountId: "bybit:UNIFIED", txId: "buy1", type: "buy", symbol: "USDC", quantity: 100, price: 1.0, timestamp: 1000 },
+            { accountId: "bybit:UNIFIED", txId: "sell1", type: "sell", symbol: "USDC", quantity: 50, price: 1.05, timestamp: 2000 },
+          ]),
+        }),
+      },
+    });
+
+    const without = await executeGetPnl({}, orch);
+    expect(without.total.realizedFromHistory).toBeNull();
+    expect(without.byAccount[0]!.realizedFromHistory).toBeNull();
+
+    const withHistory = await executeGetPnl({ include_history: true }, orch);
+    expect(withHistory.total.realizedFromHistory).not.toBeNull();
+    expect(withHistory.total.realizedFromHistory!.knownRealized).toBeCloseTo(2.5, 6);
+    expect(withHistory.total.realizedFromHistory!.unknownSalesCount).toBe(0);
+    expect(withHistory.total.realizedFromHistory!.orphanCount).toBe(0);
+    expect(withHistory.byAccount[0]!.realizedFromHistory!.knownRealized).toBeCloseTo(2.5, 6);
+  });
+
+  test("include_history surfaces unknown-cost-basis sales in notes (MetaMask deposit-then-sell)", async () => {
+    // MetaMask: deposit (no price) followed by a synthetic SELL. Realized PnL
+    // should be null in cost_basis output → reflected as unknownSalesCount=1
+    // and surfaced in the account's notes.
+    setupAccount("metamask:0xabc", "metamask");
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        metamask: new StubConnector({
+          id: "metamask",
+          holdingsResult: ok([makeHolding({ accountId: "metamask:0xabc", symbol: "FOO", quantity: 50, value: 100, metadata: { chainId: 1 } })]),
+          transactionsResult: ok([
+            { accountId: "metamask:0xabc", txId: "dep1", type: "deposit", symbol: "FOO", quantity: 100, timestamp: 1000 },
+            { accountId: "metamask:0xabc", txId: "sell1", type: "sell", symbol: "FOO", quantity: 50, price: 2.0, timestamp: 2000 },
+          ]),
+        }),
+      },
+    });
+
+    const result = await executeGetPnl({ include_history: true }, orch);
+    const account = result.byAccount[0]!;
+    expect(account.realizedFromHistory!.knownRealized).toBe(0);
+    expect(account.realizedFromHistory!.unknownSalesCount).toBe(1);
+    expect(account.notes.join(" ")).toContain("unknown cost basis");
+  });
 });

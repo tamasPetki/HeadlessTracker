@@ -523,9 +523,11 @@ async function showPnl(args: string[]): Promise<void> {
   const flags = parseFlags(args);
   const tf = flags["timeframe"];
   const validTf = tf === "24h" || tf === "7d" || tf === "30d" || tf === "ytd" || tf === "all" ? tf : undefined;
+  const includeHistory = flags["include-history"] === "true" || flags["include-history"] === "";
   const result = await executeGetPnl({
     account_id: flags["account-id"],
     timeframe: validTf,
+    include_history: includeHistory,
   });
 
   if (result.byAccount.length === 0) {
@@ -546,6 +548,13 @@ async function showPnl(args: string[]): Promise<void> {
   console.log(`  cost basis:     ${fmtUsd(result.total.costBasis)}`);
   console.log(`  unrealized PnL: ${fmtUsd(result.total.unrealizedPnl)}`);
   console.log(`  realized PnL:   ${fmtUsd(result.total.realizedPnl)}`);
+  if (result.total.realizedFromHistory) {
+    const h = result.total.realizedFromHistory;
+    console.log(`\nFrom transaction history (FIFO cost basis):`);
+    console.log(`  realized (known cost basis): ${fmtUsd(h.knownRealized)}`);
+    console.log(`  sales with unknown cost:     ${h.unknownSalesCount}`);
+    console.log(`  orphan events:               ${h.orphanCount}`);
+  }
   console.log(`\n${result.timeframeNote}`);
   // Surface per-account notes (e.g. "MetaMask doesn't track cost basis").
   const allNotes = new Set<string>();

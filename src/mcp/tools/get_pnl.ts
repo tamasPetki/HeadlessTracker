@@ -15,7 +15,8 @@
 import { z } from "zod";
 
 import { defaultOrchestrator, type Orchestrator } from "../orchestrator.ts";
-import type { Holding } from "../../types.ts";
+import type { Holding, Transaction } from "../../types.ts";
+import { computeCostBasis } from "../../cost_basis.ts";
 
 export const GET_PNL_TOOL_NAME = "get_pnl";
 
@@ -37,16 +38,27 @@ export const GET_PNL_DESCRIPTION = [
   "    V0 returns point-in-time P&L based on what each connector reports.",
   "    True time-windowed P&L requires price history we don't yet store.",
   "    If the user asks for time-windowed P&L, EXPLAIN this honestly — don't fabricate.",
+  "  - include_history (boolean, default false): also pulls transactions and runs",
+  "    a FIFO cost-basis ledger over them, returning `realizedFromHistory` per",
+  "    account + total. Costs an extra round-trip per account but unlocks honest",
+  "    realized PnL on tokens born on-chain (LP rewards, swaps, native airdrops).",
+  "    Tokens that arrived via wallet transfer-in (no price) get `unknownSalesCount`",
+  "    not inflated knownRealized — explicit honesty about what cost basis we know.",
 ].join(" ");
 
 export const GET_PNL_INPUT_SCHEMA = {
   account_id: z.string().optional(),
   timeframe: z.enum(["24h", "7d", "30d", "ytd", "all"]).optional(),
+  include_history: z.boolean().optional(),
 };
 
 export interface GetPnlArgs {
   account_id?: string;
   timeframe?: "24h" | "7d" | "30d" | "ytd" | "all";
+  // When true, also fetches transactions and runs FIFO cost-basis through
+  // them. Surfaces a `realizedFromHistory` block per account. Costs an extra
+  // round-trip per account (transactions endpoint), so it's opt-in.
+  include_history?: boolean;
 }
 
 interface AccountPnl {
@@ -55,6 +67,21 @@ interface AccountPnl {
   costBasis: number | null;
   unrealizedPnl: number | null;
   realizedPnl: number | null;
+  // Populated only when args.include_history=true. Surfaces the on-chain /
+  // exchange-history derived realized PnL via FIFO cost basis.
+  // - knownRealized: sum of realized PnL where every consumed lot had a
+  //   known cost basis (priced BUY/TRADE).
+  // - unknownSalesCount: sales whose realized PnL is unknown because at
+  //   least one consumed lot came from an unpriced source (e.g. a wallet
+  //   transfer-in). These are NOT counted in knownRealized — that would
+  //   inflate the number.
+  // - orphanCount: SELLs without sufficient prior history (incomplete
+  //   transaction window).
+  realizedFromHistory: {
+    knownRealized: number;
+    unknownSalesCount: number;
+    orphanCount: number;
+  } | null;
   notes: string[];
 }
 
@@ -64,6 +91,12 @@ export interface GetPnlResult {
     costBasis: number;
     unrealizedPnl: number;
     realizedPnl: number;
+    // Populated only when args.include_history=true. Sum across accounts.
+    realizedFromHistory: {
+      knownRealized: number;
+      unknownSalesCount: number;
+      orphanCount: number;
+    } | null;
   };
   byAccount: AccountPnl[];
   failures: Array<{ accountId: string; error: string }>;
@@ -127,6 +160,7 @@ function pnlForAccount(holdings: Holding[]): AccountPnl {
     costBasis: costBasisKnown > 0 ? costBasis : null,
     unrealizedPnl: costBasisKnown > 0 ? currentValue - costBasis : null,
     realizedPnl: realizedPnl !== 0 ? realizedPnl : null,
+    realizedFromHistory: null,                         // populated by caller iff include_history=true
     notes,
   };
 }
@@ -151,6 +185,40 @@ export async function executeGetPnl(
     byAccount.push(pnlForAccount(holdings));
   }
 
+  // Optional: pull transactions and run FIFO cost basis. Requires an extra
+  // round-trip per account (transactions endpoint) and is opt-in. Unknown-cost
+  // sales (e.g. on-chain ERC-20 transfers without price) propagate as
+  // `unknownSalesCount`, NOT inflated into knownRealized — that's the whole
+  // point of the "honest cost basis" framing.
+  if (args.include_history) {
+    const txAggregate = await orchestrator.getTransactions(accountIds, undefined);
+    const byAccountTx = new Map<string, Transaction[]>();
+    for (const t of txAggregate.data) {
+      const arr = byAccountTx.get(t.accountId) ?? [];
+      arr.push(t);
+      byAccountTx.set(t.accountId, arr);
+    }
+    for (const account of byAccount) {
+      const txs = byAccountTx.get(account.accountId) ?? [];
+      const cb = computeCostBasis(txs);
+      account.realizedFromHistory = {
+        knownRealized: cb.totals.realizedKnown,
+        unknownSalesCount: cb.totals.realizedUnknownCount,
+        orphanCount: cb.totals.orphanCount,
+      };
+      if (cb.totals.realizedUnknownCount > 0) {
+        account.notes.push(
+          `${cb.totals.realizedUnknownCount} sale(s) had unknown cost basis (deposits / transfers without price). Realized PnL excludes them.`
+        );
+      }
+      if (cb.totals.orphanCount > 0) {
+        account.notes.push(
+          `${cb.totals.orphanCount} orphan event(s) — sells exceeded the known transaction history window.`
+        );
+      }
+    }
+  }
+
   // Aggregate totals — only count costBasis/unrealized where we have it.
   let totalCurrent = 0;
   let totalCostBasis = 0;
@@ -163,12 +231,29 @@ export async function executeGetPnl(
     if (a.realizedPnl !== null) totalRealized += a.realizedPnl;
   }
 
+  // Aggregate the history block across accounts (only if any account has it set).
+  let totalHistory: GetPnlResult["total"]["realizedFromHistory"] = null;
+  if (args.include_history) {
+    let knownRealized = 0;
+    let unknownSalesCount = 0;
+    let orphanCount = 0;
+    for (const a of byAccount) {
+      if (a.realizedFromHistory) {
+        knownRealized += a.realizedFromHistory.knownRealized;
+        unknownSalesCount += a.realizedFromHistory.unknownSalesCount;
+        orphanCount += a.realizedFromHistory.orphanCount;
+      }
+    }
+    totalHistory = { knownRealized, unknownSalesCount, orphanCount };
+  }
+
   return {
     total: {
       currentValue: totalCurrent,
       costBasis: totalCostBasis,
       unrealizedPnl: totalUnrealized,
       realizedPnl: totalRealized,
+      realizedFromHistory: totalHistory,
     },
     byAccount,
     failures: aggregate.failures,

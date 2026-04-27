@@ -10,10 +10,10 @@
   "scripts": {
     "start": "bun run src/mcp/server.ts",
     "setup": "bun run bin/headless-tracker.ts setup",
-    "test": "bun test --timeout 15000",
-    "test:watch": "bun test --watch --timeout 15000",
+    "test": "bun test --timeout=15000",
+    "test:watch": "bun test --watch --timeout=15000",
     "typecheck": "bun --bun tsc --noEmit",
-    "prepublishOnly": "bun test --timeout 15000 && bun --bun tsc --noEmit"
+    "prepublishOnly": "bun test --timeout=15000 && bun --bun tsc --noEmit"
   },
   "files": [
     "bin/",
