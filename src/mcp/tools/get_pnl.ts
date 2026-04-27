@@ -44,6 +44,10 @@ export const GET_PNL_DESCRIPTION = [
   "    realized PnL on tokens born on-chain (LP rewards, swaps, native airdrops).",
   "    Tokens that arrived via wallet transfer-in (no price) get `unknownSalesCount`",
   "    not inflated knownRealized — explicit honesty about what cost basis we know.",
+  "    POLYMARKET-SPECIFIC: when include_history=true, the Polymarket account's",
+  "    realizedPnl is replaced by the FIFO-from-/trades number. Default mode leaves",
+  "    Polymarket realizedPnl null because the connector's cashPnl mixes realized",
+  "    + unrealized — set include_history=true to get the real realized number.",
 ].join(" ");
 
 export const GET_PNL_INPUT_SCHEMA = {
@@ -123,15 +127,15 @@ function pnlForAccount(holdings: Holding[]): AccountPnl {
       costBasis += h.avgCost * h.quantity;
       costBasisKnown++;
     }
-    // Connector-specific P&L extraction from metadata.
+    // Connector-specific realized PnL extraction from metadata.
+    // Bybit's cumRealisedPnl is a true realized-only field, safe to add.
+    // MetaMask doesn't surface realized at the holding level.
+    // Polymarket's `cashPnl` mixes realized + unrealized — DO NOT use it here.
+    // For honest realized PnL on Polymarket, callers must opt into
+    // include_history=true so we can compute it from the /trades ledger.
     const meta = h.metadata ?? {};
     if (typeof meta.realizedPnl === "number") realizedPnl += meta.realizedPnl;
     if (typeof meta.cumRealisedPnl === "string") realizedPnl += parseFloat(meta.cumRealisedPnl) || 0;
-    if (typeof meta.cashPnl === "number") {
-      // For Polymarket "cashPnl" represents realized + unrealized combined.
-      // We surface it as realized for simplicity; LLM can reason from currentValue diff.
-      realizedPnl += meta.cashPnl;
-    }
     // Sniff which connector this is for note generation.
     if (typeof meta.chainId === "number") hasMetamask = true;
     if (typeof meta.eventSlug === "string" || meta.outcome) hasPolymarket = true;
@@ -148,7 +152,7 @@ function pnlForAccount(holdings: Holding[]): AccountPnl {
     notes.push("MetaMask connector does not yet track cost basis (V0 limitation).");
   }
   if (hasPolymarket) {
-    notes.push("Polymarket cashPnl combines realized + unrealized; surfaced as realizedPnl here.");
+    notes.push("Polymarket realized PnL is null by default. Pass include_history=true to compute it from /trades history (FIFO).");
   }
   if (hasBybit) {
     notes.push("Bybit cumRealisedPnl from V5 metadata included in realizedPnl.");
@@ -206,6 +210,21 @@ export async function executeGetPnl(
         unknownSalesCount: cb.totals.realizedUnknownCount,
         orphanCount: cb.totals.orphanCount,
       };
+      // Polymarket: the canonical realized PnL is the FIFO-from-trades number.
+      // Promote it into account.realizedPnl (overriding the null we left there
+      // in pnlForAccount). Bybit and MetaMask keep whatever pnlForAccount set
+      // because their metadata-based realized is already trusted.
+      if (account.accountId.startsWith("polymarket:")) {
+        const previousRealized = account.realizedPnl ?? 0;
+        account.realizedPnl = cb.totals.realizedKnown;
+        // Drop the "by default null" note now that we have an actual number.
+        account.notes = account.notes.filter((n) => !n.includes("Polymarket realized PnL is null by default"));
+        account.notes.push(
+          `Polymarket realizedPnl computed from ${cb.realizedSales.length} trade event(s) via FIFO over /trades.`
+        );
+        // Fold the previous (probably zero) into nothing — the FIFO replaces it.
+        void previousRealized;
+      }
       if (cb.totals.realizedUnknownCount > 0) {
         account.notes.push(
           `${cb.totals.realizedUnknownCount} sale(s) had unknown cost basis (deposits / transfers without price). Realized PnL excludes them.`
