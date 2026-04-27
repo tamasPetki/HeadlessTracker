@@ -286,4 +286,74 @@ describe("Orchestrator", () => {
     expect(bybitStub.callCount.holdings).toBe(2);      // re-fetched
     expect(mmStub.callCount.holdings).toBe(1);         // still cached
   });
+
+  test("Account.metadata.customTokens flows into the connector's credentials", async () => {
+    // The CLI writes customTokens to AccountStore (Account.metadata). The
+    // orchestrator must merge it into the credentials object so MetaMaskConnector
+    // sees it via creds.customTokens (its existing interface). This test pins
+    // the merge so neither layer drifts apart.
+    accountStore.upsert({
+      id: "metamask:0xabc",
+      connectorId: "metamask",
+      label: "MM",
+      createdAt: 1,
+      metadata: {
+        customTokens: {
+          "1": [
+            { contract: "0xCustom1", symbol: "CUSTOM", decimals: 18 },
+          ],
+        },
+      },
+    });
+    vault.set("metamask", "0xabc", { address: "0xabc", etherscanApiKey: "k", chainIds: [1], trackCommonTokens: false });
+
+    let capturedCreds: Record<string, unknown> | undefined;
+    const stub = new StubConnector({
+      id: "metamask",
+      holdingsResult: (ctx) => {
+        capturedCreds = ctx.credentials as Record<string, unknown>;
+        return ok([]);
+      },
+    });
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      connectorOverrides: { metamask: stub },
+    });
+
+    await orch.getHoldings(undefined);
+    expect(capturedCreds).toBeDefined();
+    expect(capturedCreds!.customTokens).toEqual({
+      "1": [{ contract: "0xCustom1", symbol: "CUSTOM", decimals: 18 }],
+    });
+    // Original vault credentials must be preserved (not clobbered by the merge).
+    expect(capturedCreds!.etherscanApiKey).toBe("k");
+    expect(capturedCreds!.address).toBe("0xabc");
+  });
+
+  test("Accounts WITHOUT customTokens metadata get unmodified credentials", async () => {
+    // Negative case: don't accidentally inject `customTokens: undefined` or {}.
+    accountStore.upsert({ id: "metamask:0xabc", connectorId: "metamask", label: "MM", createdAt: 1 });
+    vault.set("metamask", "0xabc", { address: "0xabc", etherscanApiKey: "k" });
+
+    let capturedCreds: Record<string, unknown> | undefined;
+    const stub = new StubConnector({
+      id: "metamask",
+      holdingsResult: (ctx) => {
+        capturedCreds = ctx.credentials as Record<string, unknown>;
+        return ok([]);
+      },
+    });
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      connectorOverrides: { metamask: stub },
+    });
+
+    await orch.getHoldings(undefined);
+    expect(capturedCreds).toBeDefined();
+    expect(capturedCreds!.customTokens).toBeUndefined();
+  });
 });

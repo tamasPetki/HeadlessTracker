@@ -188,9 +188,20 @@ export class Orchestrator {
         );
         if (!credsResult.ok) return credsResult;
 
+        // Merge account.metadata.customTokens into the credentials so the
+        // connector sees them via creds.customTokens (its existing interface)
+        // without ever storing token contracts in the secret vault. Tokens
+        // are public on-chain data, not secrets — Account.metadata is the
+        // right home for them.
+        const customTokens = account.metadata?.customTokens;
+        const credentials =
+          customTokens && typeof customTokens === "object"
+            ? { ...credsResult.value, customTokens }
+            : credsResult.value;
+
         const ctx: ConnectorContext = {
           account,
-          credentials: credsResult.value,
+          credentials,
           signal: opts.signal,
         };
 

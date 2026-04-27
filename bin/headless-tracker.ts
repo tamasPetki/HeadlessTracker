@@ -12,6 +12,11 @@
 import * as readline from "node:readline/promises";
 
 import { defaultAccountStore } from "../src/accounts.ts";
+import {
+  addCustomToken,
+  listCustomTokens,
+  removeCustomToken,
+} from "../src/tokens.ts";
 import { BybitConnector } from "../src/connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask.ts";
 import { PolymarketConnector } from "../src/connectors/polymarket.ts";
@@ -34,6 +39,7 @@ Usage:
   headless-tracker show holdings [...]    Print current holdings (text table, no Claude required)
   headless-tracker show pnl [...]         Print aggregate P&L
   headless-tracker show transactions [..] Print transaction history
+  headless-tracker token <add|list|rm>    Manage custom ERC-20 token list (per MetaMask account/chain)
   headless-tracker help                   Show this help
 
 Connectors: bybit, metamask, polymarket
@@ -583,6 +589,98 @@ async function showTransactions(args: string[]): Promise<void> {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// `token` subcommands — manage custom ERC-20 token lists per (account, chain).
+// Pure logic lives in src/tokens.ts. CLI handlers below are argv-parse + error
+// printing; the testable surface is the tokens module.
+// ──────────────────────────────────────────────────────────────────────────────
+
+async function tokenAdd(args: string[]): Promise<void> {
+  if (args.length < 5) {
+    console.error("Usage: headless-tracker token add <account-id> <chain-id> <contract> <symbol> <decimals>");
+    console.error("Example: headless-tracker token add metamask:0xabc 1 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 USDC 6");
+    process.exit(1);
+  }
+  const [accountId, chainIdStr, contract, symbol, decimalsStr] = args;
+  const chainId = parseInt(chainIdStr!, 10);
+  const decimals = parseInt(decimalsStr!, 10);
+
+  const result = addCustomToken(defaultAccountStore(), accountId!, chainId, {
+    contract: contract!,
+    symbol: symbol!,
+    decimals,
+  });
+  if (!result.ok) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
+  if (result.value.action === "updated") {
+    console.log(`Updated ${symbol} on chain ${chainId} for ${accountId}.`);
+  } else {
+    console.log(`Added ${symbol} (${contract}) on chain ${chainId} for ${accountId}.`);
+  }
+}
+
+async function tokenListCmd(args: string[]): Promise<void> {
+  const accountId = args[0];
+  if (accountId && !defaultAccountStore().get(accountId)) {
+    console.error(`Account not found: ${accountId}.`);
+    process.exit(1);
+  }
+  const listed = listCustomTokens(defaultAccountStore(), accountId);
+  if (listed.length === 0) {
+    console.log(accountId ? `No custom tokens for ${accountId}.` : "No custom tokens configured for any account.");
+    return;
+  }
+  let lastAccount = "";
+  for (const row of listed) {
+    if (row.accountId !== lastAccount) {
+      console.log(`\n${row.accountId}:`);
+      lastAccount = row.accountId;
+    }
+    console.log(`  ${row.chainName.padEnd(18)} ${row.token.symbol.padEnd(8)} ${row.token.contract}  decimals=${row.token.decimals}`);
+  }
+}
+
+async function tokenRemoveCmd(args: string[]): Promise<void> {
+  if (args.length < 3) {
+    console.error("Usage: headless-tracker token remove <account-id> <chain-id> <contract>");
+    process.exit(1);
+  }
+  const [accountId, chainIdStr, contract] = args;
+  const chainId = parseInt(chainIdStr!, 10);
+  const result = removeCustomToken(defaultAccountStore(), accountId!, chainId, contract!);
+  if (!result.ok) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
+  console.log(`Removed ${contract} on chain ${chainId} from ${accountId}.`);
+}
+
+async function token(action: string | undefined, rest: string[]): Promise<void> {
+  switch (action) {
+    case "add":
+      return tokenAdd(rest);
+    case "list":
+      return tokenListCmd(rest);
+    case "remove":
+    case "rm":
+      return tokenRemoveCmd(rest);
+    default:
+      console.log("Usage: headless-tracker token <add|list|remove> [args...]");
+      console.log("");
+      console.log("  token add <account-id> <chain-id> <contract> <symbol> <decimals>");
+      console.log("  token list [account-id]");
+      console.log("  token remove <account-id> <chain-id> <contract>");
+      console.log("");
+      console.log("Examples:");
+      console.log("  headless-tracker token add metamask:0xabc 1 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 USDC 6");
+      console.log("  headless-tracker token list metamask:0xabc");
+      console.log("  headless-tracker token remove metamask:0xabc 1 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+      if (action) process.exit(1);
+  }
+}
+
 async function show(thing: string | undefined, rest: string[]): Promise<void> {
   switch (thing) {
     case "holdings":
@@ -622,6 +720,8 @@ async function main(): Promise<void> {
       return listAccounts();
     case "show":
       return show(args[1], args.slice(2));
+    case "token":
+      return token(args[1], args.slice(2));
     default:
       console.error(`Unknown command: ${cmd}`);
       printHelp();

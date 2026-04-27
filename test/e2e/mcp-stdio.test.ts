@@ -149,6 +149,10 @@ afterAll(async () => {
   await client.close();
 });
 
+// Per-test timeout overridden via package.json `test` script (--timeout 15000).
+// Bun's default 5s flakes under whole-suite CPU load when the MCP child process
+// is spawn + JSON-RPC exchanged. Individual tests run ~50-300ms in practice.
+
 describe("E2E: MCP stdio server", () => {
   test("initialize returns expected serverInfo", async () => {
     // Already done in beforeAll; re-issuing produces a second handshake which
