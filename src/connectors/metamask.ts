@@ -76,7 +76,14 @@ const COMMON_TOKENS: Record<SupportedChainId, Array<{ contract: string; symbol: 
 };
 
 interface MetaMaskCreds extends ConnectorCredentials {
-  address: string;                 // 0x... 40 hex chars
+  // Legacy single-address field. New code should populate `addresses[]`. Kept
+  // for back-compat: existing v0.7.x vaults have `address` only, and the
+  // connector auto-lifts it to a 1-element `addresses` list at runtime.
+  address?: string;
+  // Multi-wallet: one Account can track several addresses sharing the same
+  // Etherscan key + chain selection (e.g. hot wallet + cold wallet for the
+  // same user). Connector fans out per-address × per-chain at fetch time.
+  addresses?: string[];
   etherscanApiKey: string;         // single key for all chains via V2
   chainIds: SupportedChainId[];    // which chains to query
   trackCommonTokens: boolean;      // include the bundled COMMON_TOKENS list per chain
@@ -87,10 +94,30 @@ interface MetaMaskCreds extends ConnectorCredentials {
   hasEtherscanPro?: boolean;
 }
 
+const ADDRESS_RX = /^0x[a-fA-F0-9]{40}$/;
+
+// Normalize legacy single-address vaults to a list. v0.8 #6 multi-wallet lift.
+// Returns the canonical list of addresses to fan out over, or empty if neither
+// `address` nor `addresses` was populated.
+function getAddresses(creds: MetaMaskCreds): string[] {
+  if (Array.isArray(creds.addresses) && creds.addresses.length > 0) {
+    return creds.addresses;
+  }
+  if (typeof creds.address === "string" && creds.address.length > 0) {
+    return [creds.address];
+  }
+  return [];
+}
+
 function isMetaMaskCreds(c: ConnectorCredentials): c is MetaMaskCreds {
+  // Either form is acceptable: legacy single `address` OR new `addresses[]`.
+  // At least one address must be a valid hex string.
+  const single = typeof c.address === "string" && ADDRESS_RX.test(c.address);
+  const list = Array.isArray(c.addresses)
+    && c.addresses.length > 0
+    && (c.addresses as unknown[]).every((a) => typeof a === "string" && ADDRESS_RX.test(a));
   return (
-    typeof c.address === "string" &&
-    /^0x[a-fA-F0-9]{40}$/.test(c.address) &&
+    (single || list) &&
     typeof c.etherscanApiKey === "string" &&
     Array.isArray(c.chainIds) &&
     typeof c.trackCommonTokens === "boolean"
@@ -187,7 +214,7 @@ export class MetaMaskConnector implements Connector {
     if (!isMetaMaskCreds(creds)) {
       return err(
         "schema_mismatch",
-        "MetaMask credentials must include { address, etherscanApiKey, chainIds[], trackCommonTokens }"
+        "MetaMask credentials must include { address (or addresses[]), etherscanApiKey, chainIds[], trackCommonTokens }"
       );
     }
     if (creds.chainIds.length === 0) {
@@ -198,14 +225,20 @@ export class MetaMaskConnector implements Connector {
         return err("schema_mismatch", `Unsupported chainId: ${chainId}`);
       }
     }
+    const addresses = getAddresses(creds);
+    if (addresses.length === 0) {
+      return err("schema_mismatch", "At least one address must be provided (address or addresses[])");
+    }
 
-    // Validate the API key by checking ETH balance on chain 1 (cheapest call).
+    // Validate the API key by checking ETH balance on chain 1 for the FIRST
+    // address (cheapest call). If the key works for one address, it works
+    // for all on that chain.
     const result = await etherscanCall<string>(
       {
         chainid: "1",
         module: "account",
         action: "balance",
-        address: creds.address,
+        address: addresses[0]!,
         tag: "latest",
         apikey: creds.etherscanApiKey,
       },
@@ -220,6 +253,7 @@ export class MetaMaskConnector implements Connector {
       return err("schema_mismatch", "MetaMask credentials malformed");
     }
     const creds = ctx.credentials;
+    const addresses = getAddresses(creds);
     const allHoldings: Holding[] = [];
     const chainErrors: string[] = [];
     const skippedChains: string[] = [];     // soft-skipped (e.g. free tier blocked)
@@ -237,25 +271,31 @@ export class MetaMaskConnector implements Connector {
       chainsToQuery.push(chainId);
     }
 
-    // Per-chain fetch in parallel (eng review 4A: parallel fetch).
-    const perChain = await Promise.all(
-      chainsToQuery.map(async (chainId): Promise<{ chainId: SupportedChainId; result: Result<Holding[]> }> => {
-        const chainResult = await this.fetchChainHoldings(ctx, chainId);
-        return { chainId, result: chainResult };
-      })
+    // Fan out per-(address, chain) in parallel. With N=1 wallet (the v0.7
+    // case) and chains=6, this is the same 6 calls as before. With N=2
+    // wallets it's 12 calls — Etherscan free tier is 5 calls/sec, but the
+    // SDK absorbs short bursts via retries, and our chain-level token
+    // sub-fetch is already sequential per chain to stay under that limit.
+    const perAddrChain = await Promise.all(
+      addresses.flatMap((address) =>
+        chainsToQuery.map(async (chainId): Promise<{ chainId: SupportedChainId; address: string; result: Result<Holding[]> }> => {
+          const chainResult = await this.fetchChainHoldings(ctx, chainId, address);
+          return { chainId, address, result: chainResult };
+        })
+      )
     );
 
-    for (const { chainId, result } of perChain) {
+    for (const { chainId, address, result } of perAddrChain) {
       if (!result.ok) {
-        // Detect runtime free-tier-blocked even on chains we thought were OK
-        // (Etherscan can change tier coverage, or the user's key may be on a
-        // different plan than expected). Treat as a soft skip rather than hard fail.
         if (result.error.message.toLowerCase().includes(FREE_TIER_BLOCKED_MARKER)) {
           const info = SUPPORTED_CHAINS[chainId];
           skippedChains.push(`${info.name} (chain ${chainId}) returned 'free tier not supported' at runtime — Etherscan key may not have access`);
           continue;
         }
-        chainErrors.push(`chain ${chainId}: ${result.error.message}`);
+        // Tag the error with the address so a multi-wallet user can see which
+        // wallet had the issue.
+        const tag = addresses.length > 1 ? ` (wallet ${address.slice(0, 6)}...${address.slice(-4)})` : "";
+        chainErrors.push(`chain ${chainId}${tag}: ${result.error.message}`);
         continue;
       }
       allHoldings.push(...result.value);
@@ -284,7 +324,8 @@ export class MetaMaskConnector implements Connector {
 
   private async fetchChainHoldings(
     ctx: ConnectorContext,
-    chainId: SupportedChainId
+    chainId: SupportedChainId,
+    address: string
   ): Promise<Result<Holding[]>> {
     const creds = ctx.credentials as MetaMaskCreds;
     const chainInfo = SUPPORTED_CHAINS[chainId];
@@ -297,7 +338,7 @@ export class MetaMaskConnector implements Connector {
         chainid: String(chainId),
         module: "account",
         action: "balance",
-        address: creds.address,
+        address,
         tag: "latest",
         apikey: creds.etherscanApiKey,
       },
@@ -312,7 +353,7 @@ export class MetaMaskConnector implements Connector {
         assetClass: "crypto",
         quantity: nativeQty,
         valueCurrency: "USD",
-        metadata: { chainId, chainName: chainInfo.name, native: true, address: creds.address },
+        metadata: { chainId, chainName: chainInfo.name, native: true, address },
         fetchedAt: now,
       });
     }
@@ -336,19 +377,14 @@ export class MetaMaskConnector implements Connector {
           module: "account",
           action: "tokenbalance",
           contractaddress: token.contract,
-          address: creds.address,
+          address,
           tag: "latest",
           apikey: creds.etherscanApiKey,
         },
         ctx.signal
       );
       if (!tokenRes.ok) {
-        // Per-token failure shouldn't fail the whole chain. Log via metadata of the chain
-        // result; for simplicity, just skip the token (rate-limit will recover next refresh).
-        if (tokenRes.error.kind === "rate_limited") {
-          // Hard stop: no point continuing on this chain if we're rate-limited.
-          break;
-        }
+        if (tokenRes.error.kind === "rate_limited") break;
         continue;
       }
       const qty = applyDecimals(tokenRes.value, token.decimals);
@@ -364,7 +400,7 @@ export class MetaMaskConnector implements Connector {
           chainName: chainInfo.name,
           contract: token.contract,
           decimals: token.decimals,
-          address: creds.address,
+          address,
         },
         fetchedAt: now,
       });
@@ -381,6 +417,7 @@ export class MetaMaskConnector implements Connector {
       return err("schema_mismatch", "MetaMask credentials malformed");
     }
     const creds = ctx.credentials;
+    const addresses = getAddresses(creds);
     const allTxs: Transaction[] = [];
     const chainErrors: string[] = [];
     const skippedChains: string[] = [];
@@ -400,21 +437,25 @@ export class MetaMaskConnector implements Connector {
     // ~13s avg block time on Ethereum, faster on L2s — coarse but Etherscan ignores
     // bad block numbers gracefully (returns empty if startBlock > tip).
 
-    const perChain = await Promise.all(
-      chainsToQuery.map(async (chainId): Promise<{ chainId: SupportedChainId; result: Result<Transaction[]> }> => {
-        const chainResult = await this.fetchChainTransactions(ctx, chainId, startBlockApprox);
-        return { chainId, result: chainResult };
-      })
+    // Same fan-out shape as fetchHoldings: per-(address × chain) parallel.
+    const perAddrChain = await Promise.all(
+      addresses.flatMap((address) =>
+        chainsToQuery.map(async (chainId): Promise<{ chainId: SupportedChainId; address: string; result: Result<Transaction[]> }> => {
+          const chainResult = await this.fetchChainTransactions(ctx, chainId, startBlockApprox, address);
+          return { chainId, address, result: chainResult };
+        })
+      )
     );
 
-    for (const { chainId, result } of perChain) {
+    for (const { chainId, address, result } of perAddrChain) {
       if (!result.ok) {
         if (result.error.message.toLowerCase().includes(FREE_TIER_BLOCKED_MARKER)) {
           const info = SUPPORTED_CHAINS[chainId];
           skippedChains.push(`${info.name} (chain ${chainId}) returned 'free tier not supported' at runtime`);
           continue;
         }
-        chainErrors.push(`chain ${chainId}: ${result.error.message}`);
+        const tag = addresses.length > 1 ? ` (wallet ${address.slice(0, 6)}...${address.slice(-4)})` : "";
+        chainErrors.push(`chain ${chainId}${tag}: ${result.error.message}`);
         continue;
       }
       allTxs.push(...result.value);
@@ -436,12 +477,13 @@ export class MetaMaskConnector implements Connector {
   private async fetchChainTransactions(
     ctx: ConnectorContext,
     chainId: SupportedChainId,
-    startBlock: number
+    startBlock: number,
+    address: string
   ): Promise<Result<Transaction[]>> {
     const creds = ctx.credentials as MetaMaskCreds;
     const chainInfo = SUPPORTED_CHAINS[chainId];
     const txs: Transaction[] = [];
-    const myAddr = creds.address.toLowerCase();
+    const myAddr = address.toLowerCase();
 
     interface NormalTx {
       blockNumber: string;
@@ -478,7 +520,7 @@ export class MetaMaskConnector implements Connector {
           chainid: String(chainId),
           module: "account",
           action: "txlist",
-          address: creds.address,
+          address,
           startblock: String(startBlock),
           endblock: "latest",
           page: "1",
@@ -493,7 +535,7 @@ export class MetaMaskConnector implements Connector {
           chainid: String(chainId),
           module: "account",
           action: "tokentx",
-          address: creds.address,
+          address,
           startblock: String(startBlock),
           endblock: "latest",
           page: "1",

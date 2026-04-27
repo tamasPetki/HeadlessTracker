@@ -457,4 +457,123 @@ describe("MetaMaskConnector.fetchHoldings (mocked Etherscan)", () => {
       expect(["rate_limited", "upstream_error"]).toContain(result.error.kind);
     }
   });
+
+  test("multi-wallet (addresses[]): fans out per-(address × chain), aggregates", async () => {
+    // v0.8 #6 lift: one Account can carry several wallets sharing the same
+    // Etherscan key. Verify the connector hits each address once per chain
+    // and tags each holding's metadata.address with the right wallet.
+    const calls: Array<{ address: string; chain: string }> = [];
+    globalThis.fetch = (async (input: string | URL): Promise<Response> => {
+      const url = new URL(input.toString());
+      const addr = url.searchParams.get("address")!;
+      const chain = url.searchParams.get("chainid")!;
+      calls.push({ address: addr.toLowerCase(), chain });
+      // Different balance per address so we can tell them apart in the result.
+      const wei = addr.toLowerCase() === "0xaaaa11111111111111111111111111111111aaaa".toLowerCase()
+        ? "1000000000000000000"  // 1 ETH for wallet A
+        : "2000000000000000000"; // 2 ETH for wallet B
+      return new Response(JSON.stringify({ status: "1", message: "OK", result: wei }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new MetaMaskConnector();
+    const account: Account = { id: "metamask:multi", connectorId: "metamask", label: "Multi", createdAt: 1 };
+    const result = await conn.fetchHoldings({
+      account,
+      credentials: {
+        addresses: [
+          "0xAAAa11111111111111111111111111111111aAAA",
+          "0xBBBb22222222222222222222222222222222bBBB",
+        ],
+        etherscanApiKey: "K",
+        chainIds: [1],
+        trackCommonTokens: false,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 2 wallets × 1 chain = 2 native balance calls (no token fetches because
+      // trackCommonTokens=false and no customTokens).
+      expect(calls).toHaveLength(2);
+      // 2 ETH holdings, one per wallet.
+      expect(result.value).toHaveLength(2);
+      const symbols = result.value.map((h) => h.symbol);
+      expect(symbols).toEqual(["ETH", "ETH"]);
+      const quantities = result.value.map((h) => h.quantity).sort();
+      expect(quantities).toEqual([1, 2]);
+      // Each holding's metadata.address points to the correct wallet.
+      const addressesInResult = result.value.map((h) => (h.metadata?.address as string).toLowerCase()).sort();
+      expect(addressesInResult).toEqual([
+        "0xaaaa11111111111111111111111111111111aaaa",
+        "0xbbbb22222222222222222222222222222222bbbb",
+      ]);
+    }
+  });
+
+  test("legacy single-address vault still works (auto-migration)", async () => {
+    // v0.7.x users have credentials with `address` only (no `addresses`).
+    // The connector must continue to work without manual migration.
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(JSON.stringify({ status: "1", message: "OK", result: "1000000000000000000" }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new MetaMaskConnector();
+    const result = await conn.fetchHoldings({
+      account: { id: "metamask:legacy", connectorId: "metamask", label: "Legacy", createdAt: 1 },
+      credentials: {
+        // Only legacy `address` field — NO `addresses`.
+        address: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12",
+        etherscanApiKey: "K",
+        chainIds: [1],
+        trackCommonTokens: false,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]!.metadata?.address).toBe("0xAbCdEf1234567890aBcDeF1234567890AbCdEf12");
+    }
+  });
+
+  test("validateCredentials accepts addresses[] form", async () => {
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(JSON.stringify({ status: "1", message: "OK", result: "0" }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new MetaMaskConnector();
+    const result = await conn.validateCredentials({
+      addresses: [
+        "0xAAAa11111111111111111111111111111111aAAA",
+        "0xBBBb22222222222222222222222222222222bBBB",
+      ],
+      etherscanApiKey: "K",
+      chainIds: [1],
+      trackCommonTokens: false,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  test("validateCredentials rejects empty addresses[] AND missing legacy address", async () => {
+    const conn = new MetaMaskConnector();
+    const result = await conn.validateCredentials({
+      addresses: [],
+      etherscanApiKey: "K",
+      chainIds: [1],
+      trackCommonTokens: false,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe("schema_mismatch");
+  });
+
+  test("validateCredentials rejects malformed entry in addresses[]", async () => {
+    const conn = new MetaMaskConnector();
+    const result = await conn.validateCredentials({
+      addresses: ["0xAAAa11111111111111111111111111111111aAAA", "not-an-address"],
+      etherscanApiKey: "K",
+      chainIds: [1],
+      trackCommonTokens: false,
+    });
+    expect(result.ok).toBe(false);
+  });
 });
