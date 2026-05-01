@@ -3,7 +3,11 @@
 // downstream sums if anything in this module emits NaN.
 
 import { describe, expect, test } from "bun:test";
-import { computeCostBasis } from "../src/cost_basis.ts";
+import {
+  computeCostBasis,
+  computeCostBasisAverage,
+  computeCostBasisWithMethod,
+} from "../src/cost_basis.ts";
 import type { Transaction } from "../src/types.ts";
 
 function tx(overrides: Partial<Transaction>): Transaction {
@@ -189,5 +193,135 @@ describe("computeCostBasis — chronological ordering", () => {
     expect(result.realizedSales).toHaveLength(0);
     expect(result.orphans).toHaveLength(0);
     expect(result.openLots.size).toBe(0);
+  });
+});
+
+// ===== Average Cost method (parallel to FIFO above) =====
+
+describe("computeCostBasisAverage — basics", () => {
+  test("two buys at different prices → averaged cost", () => {
+    const result = computeCostBasisAverage([
+      tx({ type: "buy", symbol: "ETH", quantity: 1, price: 1000, timestamp: 1000 }),
+      tx({ type: "buy", symbol: "ETH", quantity: 1, price: 2000, timestamp: 2000 }),
+      tx({ type: "sell", symbol: "ETH", quantity: 1, price: 3000, timestamp: 3000 }),
+    ]);
+    expect(result.realizedSales).toHaveLength(1);
+    const sale = result.realizedSales[0]!;
+    expect(sale.quantity).toBe(1);
+    expect(sale.proceeds).toBe(3000);
+    // avg cost = (1000 + 2000) / 2 = 1500
+    expect(sale.costBasis).toBeCloseTo(1500, 6);
+    expect(sale.realizedPnl).toBeCloseTo(1500, 6);
+    // Open synthetic lot: 1 ETH at 1500 avg.
+    const lots = result.openLots.get("ETH")!;
+    expect(lots).toHaveLength(1);
+    expect(lots[0]!.quantity).toBeCloseTo(1, 6);
+    expect(lots[0]!.pricePerUnit).toBeCloseTo(1500, 6);
+    expect(lots[0]!.costBasisKnown).toBe(true);
+  });
+
+  test("partial sell preserves average cost on remainder", () => {
+    const result = computeCostBasisAverage([
+      tx({ type: "buy", symbol: "X", quantity: 2, price: 100, timestamp: 1000 }),
+      tx({ type: "buy", symbol: "X", quantity: 2, price: 200, timestamp: 2000 }),
+      // avg = 150
+      tx({ type: "sell", symbol: "X", quantity: 1, price: 250, timestamp: 3000 }),
+    ]);
+    const sale = result.realizedSales[0]!;
+    expect(sale.costBasis).toBeCloseTo(150, 6);
+    expect(sale.realizedPnl).toBeCloseTo(100, 6);
+    // 3 units left, avg still 150.
+    const lots = result.openLots.get("X")!;
+    expect(lots[0]!.quantity).toBeCloseTo(3, 6);
+    expect(lots[0]!.pricePerUnit).toBeCloseTo(150, 6);
+  });
+
+  test("withdraw reduces holdings without realizing PnL", () => {
+    const result = computeCostBasisAverage([
+      tx({ type: "buy", symbol: "X", quantity: 10, price: 5, timestamp: 1000 }),
+      tx({ type: "withdraw", symbol: "X", quantity: 3, timestamp: 2000 }),
+    ]);
+    expect(result.realizedSales).toHaveLength(0);
+    expect(result.totals.realizedKnown).toBe(0);
+    const lots = result.openLots.get("X")!;
+    expect(lots[0]!.quantity).toBeCloseTo(7, 6);
+    expect(lots[0]!.pricePerUnit).toBe(5); // avg unchanged
+  });
+});
+
+describe("computeCostBasisAverage — honest unknown handling", () => {
+  test("sell from a deposit-only pool → realizedPnl is null (NOT 0, NOT NaN)", () => {
+    // Bulltrapp would silently use $0 cost here and inflate gains. HT must NOT.
+    const result = computeCostBasisAverage([
+      tx({ type: "deposit", symbol: "USDC", quantity: 100, timestamp: 1000 }),
+      tx({ type: "sell", symbol: "USDC", quantity: 50, price: 1.05, timestamp: 2000 }),
+    ]);
+    const sale = result.realizedSales[0]!;
+    expect(sale.realizedPnl).toBeNull();
+    expect(sale.costBasis).toBeNull();
+    expect(Number.isNaN(sale.realizedPnl as unknown as number)).toBe(false);
+    expect(result.totals.realizedUnknownCount).toBe(1);
+  });
+
+  test("mixed pool (priced buy + deposit) taints subsequent sells", () => {
+    const result = computeCostBasisAverage([
+      tx({ type: "buy", symbol: "X", quantity: 10, price: 5, timestamp: 1000 }),
+      tx({ type: "deposit", symbol: "X", quantity: 10, timestamp: 1500 }),
+      tx({ type: "sell", symbol: "X", quantity: 5, price: 10, timestamp: 2000 }),
+    ]);
+    const sale = result.realizedSales[0]!;
+    expect(sale.realizedPnl).toBeNull();
+    expect(result.totals.realizedKnown).toBe(0);
+    expect(result.totals.realizedUnknownCount).toBe(1);
+  });
+
+  test("pool resets to clean after full exit", () => {
+    // Deposit → fully sold (with null realized) → fresh buy → fresh sell, NOW priced.
+    const result = computeCostBasisAverage([
+      tx({ type: "deposit", symbol: "X", quantity: 10, timestamp: 1000 }),
+      tx({ type: "sell", symbol: "X", quantity: 10, price: 5, timestamp: 2000 }),     // tainted
+      tx({ type: "buy", symbol: "X", quantity: 5, price: 10, timestamp: 3000 }),
+      tx({ type: "sell", symbol: "X", quantity: 5, price: 12, timestamp: 4000 }),     // clean
+    ]);
+    expect(result.realizedSales).toHaveLength(2);
+    expect(result.realizedSales[0]!.realizedPnl).toBeNull();
+    expect(result.realizedSales[1]!.realizedPnl).toBeCloseTo(10, 6); // 5 × (12 - 10)
+    expect(result.totals.realizedKnown).toBeCloseTo(10, 6);
+    expect(result.totals.realizedUnknownCount).toBe(1);
+  });
+
+  test("orphan sell (no prior pool) → realizedPnl null, sale.quantity = 0", () => {
+    const result = computeCostBasisAverage([
+      tx({ type: "sell", symbol: "FOO", quantity: 5, price: 100, timestamp: 1000 }),
+    ]);
+    const sale = result.realizedSales[0]!;
+    expect(sale.quantity).toBe(0);
+    expect(sale.realizedPnl).toBeNull();
+    expect(sale.costBasis).toBeNull();
+    expect(result.orphans).toHaveLength(1);
+  });
+});
+
+describe("computeCostBasisWithMethod dispatcher", () => {
+  test("method='fifo' routes to FIFO", () => {
+    const txs = [
+      tx({ type: "buy", symbol: "X", quantity: 1, price: 100, timestamp: 1000 }),
+      tx({ type: "buy", symbol: "X", quantity: 1, price: 200, timestamp: 2000 }),
+      tx({ type: "sell", symbol: "X", quantity: 1, price: 250, timestamp: 3000 }),
+    ];
+    const r = computeCostBasisWithMethod(txs, "fifo");
+    // FIFO consumes oldest lot (cost=100), realized = 250 - 100 = 150.
+    expect(r.realizedSales[0]!.realizedPnl).toBeCloseTo(150, 6);
+  });
+
+  test("method='average' routes to Average Cost", () => {
+    const txs = [
+      tx({ type: "buy", symbol: "X", quantity: 1, price: 100, timestamp: 1000 }),
+      tx({ type: "buy", symbol: "X", quantity: 1, price: 200, timestamp: 2000 }),
+      tx({ type: "sell", symbol: "X", quantity: 1, price: 250, timestamp: 3000 }),
+    ];
+    const r = computeCostBasisWithMethod(txs, "average");
+    // Average cost = 150, realized = 250 - 150 = 100.
+    expect(r.realizedSales[0]!.realizedPnl).toBeCloseTo(100, 6);
   });
 });

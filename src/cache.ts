@@ -13,11 +13,17 @@ const DEFAULT_DB_DIR = join(homedir(), ".headless-tracker");
 const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, "cache.db");
 
 // Per-connector default TTL in seconds (eng review 1F).
+// Module-internal namespaces (e.g. "_prices") may also use this cache; they
+// must always pass an explicit ttlSec to set() since they aren't ConnectorId-typed.
 const DEFAULT_TTL_SEC: Record<ConnectorId, number> = {
   metamask: 60,
   bybit: 120,
   polymarket: 30,
 };
+
+// Fallback TTL for any namespace not in DEFAULT_TTL_SEC (defensive — prices.ts
+// always passes explicit ttl, but we don't want NaN if someone forgets).
+const FALLBACK_TTL_SEC = 60;
 
 // Retry budget for SQLITE_BUSY (eng review F4).
 // WAL mode makes concurrent reads always succeed and concurrent writes serialize,
@@ -57,7 +63,7 @@ export class Cache {
     `);
   }
 
-  get<T>(connector: ConnectorId, key: string): { value: T; storedAt: number; stale: boolean } | null {
+  get<T>(connector: ConnectorId | string, key: string): { value: T; storedAt: number; stale: boolean } | null {
     const row = this.db
       .query<
         { value: string; stored_at: number; expires_at: number },
@@ -74,8 +80,8 @@ export class Cache {
     };
   }
 
-  set<T>(connector: ConnectorId, key: string, value: T, ttlSec?: number): void {
-    const ttl = ttlSec ?? DEFAULT_TTL_SEC[connector];
+  set<T>(connector: ConnectorId | string, key: string, value: T, ttlSec?: number): void {
+    const ttl = ttlSec ?? DEFAULT_TTL_SEC[connector as ConnectorId] ?? FALLBACK_TTL_SEC;
     const now = Date.now();
     const expiresAt = now + ttl * 1000;
     const serialized = JSON.stringify(value);
@@ -89,7 +95,7 @@ export class Cache {
     });
   }
 
-  invalidate(connector: ConnectorId, key?: string): void {
+  invalidate(connector: ConnectorId | string, key?: string): void {
     this.runWithRetry(() => {
       if (key) {
         this.db.prepare("DELETE FROM cache_entries WHERE connector = ? AND key = ?").run(connector, key);

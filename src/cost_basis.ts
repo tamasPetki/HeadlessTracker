@@ -245,3 +245,235 @@ function consumeLotsForWithdraw(lots: Map<string, Lot[]>, symbol: string, desire
   else lots.set(symbol, list);
   return consumed;
 }
+
+// Average Cost method (parallel to FIFO above).
+//
+// Tracks one running pool per symbol:
+//   - quantity (total holdings)
+//   - knownCost (running total cost from priced BUY/TRADE only)
+//   - hasUnknown (sticky flag: true if any deposit/reward/transfer/unpriced-buy
+//     entered the pool and it hasn't been fully closed since)
+//
+// Sell behavior:
+//   - if pool empty → orphan, realizedPnl: null
+//   - if pool.hasUnknown → realizedPnl: null (we don't fabricate a partial average)
+//   - else realizedPnl = qty * (salePrice - avgCost), where avgCost = knownCost / quantity
+//
+// Sticky-unknown rationale: once you've mixed known and unknown lots, the
+// average cost is no longer meaningful for any SELL drawing from the pool.
+// Bulltrapp's Average Cost silently uses $0 for unknown deposits, which inflates
+// realized gains. We return null instead — same "honest unknown" rule as FIFO.
+//
+// The pool resets to clean (hasUnknown=false) once quantity drops to zero, so
+// a new fresh purchase after a full exit produces a clean known average.
+//
+// Returns CostBasisResult so callers can be method-agnostic. openLots represents
+// each pool as a single synthetic lot per symbol.
+export function computeCostBasisAverage(transactions: Transaction[]): CostBasisResult {
+  const sorted = [...transactions].sort((a, b) => a.timestamp - b.timestamp);
+  const pools = new Map<string, AvgPool>();
+  const realizedSales: RealizedSale[] = [];
+  const orphans: OrphanEvent[] = [];
+  let realizedKnown = 0;
+  let realizedUnknownCount = 0;
+
+  for (const tx of sorted) {
+    const symbol = tx.symbol;
+    if (!symbol) continue;
+    const qty = tx.quantity;
+    if (qty === undefined || qty <= 0) continue;
+
+    const pool = pools.get(symbol) ?? newPool(symbol);
+    pools.set(symbol, pool);
+
+    switch (tx.type) {
+      case "buy":
+      case "trade": {
+        if (tx.price === undefined || !Number.isFinite(tx.price) || tx.price < 0) {
+          // Unpriced buy → taints the pool.
+          pool.quantity += qty;
+          pool.hasUnknown = true;
+          if (pool.firstAcquiredAt === 0) pool.firstAcquiredAt = tx.timestamp;
+          pool.lastSourceTxId = tx.txId;
+        } else {
+          pool.quantity += qty;
+          pool.knownCost += qty * tx.price;
+          if (pool.firstAcquiredAt === 0) pool.firstAcquiredAt = tx.timestamp;
+          pool.lastSourceTxId = tx.txId;
+        }
+        break;
+      }
+      case "deposit":
+      case "transfer":
+      case "reward":
+      case "interest": {
+        pool.quantity += qty;
+        pool.hasUnknown = true;
+        if (pool.firstAcquiredAt === 0) pool.firstAcquiredAt = tx.timestamp;
+        pool.lastSourceTxId = tx.txId;
+        break;
+      }
+      case "sell": {
+        if (tx.price === undefined || !Number.isFinite(tx.price) || tx.price < 0) {
+          orphans.push({
+            symbol, quantity: qty,
+            reason: "sell event missing price",
+            timestamp: tx.timestamp, sourceTxId: tx.txId,
+          });
+          break;
+        }
+        if (pool.quantity <= 0) {
+          orphans.push({
+            symbol, quantity: qty,
+            reason: "sell exceeds known holdings (no prior BUY/DEPOSIT)",
+            timestamp: tx.timestamp, sourceTxId: tx.txId,
+          });
+          // Still emit a RealizedSale with null cost — matches FIFO's pure-orphan path.
+          realizedSales.push({
+            symbol, quantity: 0,
+            proceeds: qty * tx.price,
+            costBasis: null, realizedPnl: null,
+            timestamp: tx.timestamp, sourceTxId: tx.txId,
+          });
+          realizedUnknownCount++;
+          break;
+        }
+
+        const consumeQty = Math.min(qty, pool.quantity);
+        const orphanQty = qty - consumeQty;
+        const proceeds = consumeQty * tx.price;
+        let costBasis: number | null;
+        let realizedPnl: number | null;
+
+        if (pool.hasUnknown) {
+          costBasis = null;
+          realizedPnl = null;
+          realizedUnknownCount++;
+        } else {
+          // avg cost is meaningful since pool is fully priced.
+          const avg = pool.knownCost / pool.quantity;
+          costBasis = consumeQty * avg;
+          realizedPnl = proceeds - costBasis;
+          realizedKnown += realizedPnl;
+          // Reduce the running known cost proportionally.
+          pool.knownCost -= costBasis;
+        }
+        pool.quantity -= consumeQty;
+        if (pool.quantity <= 1e-12) {
+          // Pool fully exited: reset (allows a fresh post-exit BUY to be clean).
+          pool.quantity = 0;
+          pool.knownCost = 0;
+          pool.hasUnknown = false;
+          pool.firstAcquiredAt = 0;
+        }
+
+        realizedSales.push({
+          symbol,
+          quantity: consumeQty,
+          proceeds,
+          costBasis,
+          realizedPnl,
+          timestamp: tx.timestamp,
+          sourceTxId: tx.txId,
+        });
+
+        if (orphanQty > 0) {
+          orphans.push({
+            symbol, quantity: orphanQty,
+            reason: "sell exceeds known lot history (no prior BUY/DEPOSIT)",
+            timestamp: tx.timestamp, sourceTxId: tx.txId,
+          });
+        }
+        break;
+      }
+      case "withdraw": {
+        if (pool.quantity <= 0) {
+          orphans.push({
+            symbol, quantity: qty,
+            reason: "withdraw exceeds known holdings (incomplete tx history)",
+            timestamp: tx.timestamp, sourceTxId: tx.txId,
+          });
+          break;
+        }
+        const consumeQty = Math.min(qty, pool.quantity);
+        if (!pool.hasUnknown) {
+          // Reduce knownCost proportionally so avgCost stays the same.
+          const avg = pool.knownCost / pool.quantity;
+          pool.knownCost -= consumeQty * avg;
+        }
+        pool.quantity -= consumeQty;
+        if (pool.quantity <= 1e-12) {
+          pool.quantity = 0;
+          pool.knownCost = 0;
+          pool.hasUnknown = false;
+          pool.firstAcquiredAt = 0;
+        }
+        if (consumeQty < qty) {
+          orphans.push({
+            symbol, quantity: qty - consumeQty,
+            reason: "withdraw exceeds known holdings (incomplete tx history)",
+            timestamp: tx.timestamp, sourceTxId: tx.txId,
+          });
+        }
+        break;
+      }
+      case "fee":
+      case "resolve":
+        break;
+    }
+  }
+
+  // Convert pools to synthetic single-lot form for the openLots field, so
+  // callers can treat FIFO and Average results uniformly.
+  const openLots = new Map<string, Lot[]>();
+  for (const [symbol, pool] of pools) {
+    if (pool.quantity <= 1e-12) continue;
+    const pricePerUnit = pool.hasUnknown
+      ? 0
+      : (pool.quantity > 0 ? pool.knownCost / pool.quantity : 0);
+    openLots.set(symbol, [{
+      symbol,
+      quantity: pool.quantity,
+      pricePerUnit,
+      costBasisKnown: !pool.hasUnknown,
+      acquiredAt: pool.firstAcquiredAt,
+      sourceTxId: pool.lastSourceTxId,
+    }]);
+  }
+
+  return {
+    openLots,
+    realizedSales,
+    orphans,
+    totals: {
+      realizedKnown,
+      realizedUnknownCount,
+      orphanCount: orphans.length,
+    },
+  };
+}
+
+interface AvgPool {
+  symbol: string;
+  quantity: number;
+  knownCost: number;        // sum of (qty × price) from priced BUY/TRADE only
+  hasUnknown: boolean;       // sticky-true once any unpriced entry hits the pool, until full exit
+  firstAcquiredAt: number;
+  lastSourceTxId: string;
+}
+
+function newPool(symbol: string): AvgPool {
+  return { symbol, quantity: 0, knownCost: 0, hasUnknown: false, firstAcquiredAt: 0, lastSourceTxId: "" };
+}
+
+// Method dispatcher — callers can pick FIFO or Average via a single entry point.
+export type CostBasisMethod = "fifo" | "average";
+
+export function computeCostBasisWithMethod(
+  transactions: Transaction[],
+  method: CostBasisMethod
+): CostBasisResult {
+  return method === "average"
+    ? computeCostBasisAverage(transactions)
+    : computeCostBasis(transactions);
+}
