@@ -3,6 +3,7 @@ import { AccountStore } from "../../../src/accounts.ts";
 import { Cache } from "../../../src/cache.ts";
 import { Orchestrator } from "../../../src/mcp/orchestrator.ts";
 import { executeGetPnl } from "../../../src/mcp/tools/get_pnl.ts";
+import { PriceService } from "../../../src/prices.ts";
 import { ok } from "../../../src/types.ts";
 import { StubConnector, StubVault, makeHolding } from "../../helpers/stub-connector.ts";
 
@@ -48,7 +49,7 @@ describe("executeGetPnl", () => {
     expect(result.total.unrealizedPnl).toBe(6000);          // 35000 - 29000
   });
 
-  test("timeframe param is informational only — flagged in timeframeNote", async () => {
+  test("timeframe='7d' echoes back as timeframeRequested + functional note", async () => {
     setupAccount("bybit:UNIFIED", "bybit");
     const orch = new Orchestrator({
       accountStore, cache, vault: vault as never,
@@ -57,10 +58,12 @@ describe("executeGetPnl", () => {
 
     const result7d = await executeGetPnl({ timeframe: "7d" }, orch);
     expect(result7d.timeframeRequested).toBe("7d");
-    expect(result7d.timeframeNote).toContain("V0 returns point-in-time");
+    expect(result7d.timeframeNote).toContain("'7d'");
+    expect(result7d.timeframeNote).toContain("historical prices");
 
     const resultAll = await executeGetPnl({ timeframe: "all" }, orch);
-    expect(resultAll.timeframeNote).not.toContain("V0 returns point-in-time");
+    expect(resultAll.timeframeNote).toContain("Point-in-time");
+    expect(resultAll.total.windowDelta).toBeNull();
   });
 
   test("MetaMask holdings without cost basis surface in notes (V0 limitation)", async () => {
@@ -343,5 +346,262 @@ describe("executeGetPnl", () => {
     });
     const result = await executeGetPnl({ include_history: true }, orch);
     expect(result.costBasisMethod).toBe("fifo");
+  });
+});
+
+// Time-windowed delta — uses a real PriceService with fetch mocked, plus a
+// fresh in-memory cache per test to keep historical-price cache hits isolated.
+describe("executeGetPnl — windowDelta (timeframe-driven)", () => {
+  const realFetch = globalThis.fetch;
+  let priceCache: Cache;
+  let priceSvc: PriceService;
+
+  beforeEach(() => {
+    priceCache = new Cache({ dbPath: ":memory:" });
+    priceSvc = new PriceService({ cache: priceCache });
+  });
+
+  afterEach(() => {
+    priceCache.close();
+    globalThis.fetch = realFetch;
+  });
+
+  function mockHistoricalPrice(coinId: string, usd: number): void {
+    globalThis.fetch = (async (url: string | URL): Promise<Response> => {
+      const u = String(url);
+      if (u.includes(`/coins/${coinId}/history`)) {
+        return new Response(
+          JSON.stringify({ market_data: { current_price: { usd } } }),
+          { status: 200 }
+        );
+      }
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+  }
+
+  test("timeframe='all' produces null windowDelta (no fetch)", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    let fetchCalls = 0;
+    globalThis.fetch = (async (): Promise<Response> => {
+      fetchCalls++;
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 1, value: 50000 })]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ timeframe: "all" }, orch, priceSvc);
+    expect(r.total.windowDelta).toBeNull();
+    expect(fetchCalls).toBe(0);
+  });
+
+  test("no timeframe argument → windowDelta null", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 1, value: 50000 })]),
+        }),
+      },
+    });
+    const r = await executeGetPnl({}, orch, priceSvc);
+    expect(r.total.windowDelta).toBeNull();
+  });
+
+  test("timeframe='7d' computes delta against historical CoinGecko price", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    // Hold 1 BTC currently worth $50k; 7d ago BTC was at $40k.
+    // Delta = 50000 - 40000 = +10000 (+25%).
+    mockHistoricalPrice("bitcoin", 40000);
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([
+            makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 1, value: 50000, currentPrice: 50000 }),
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ timeframe: "7d" }, orch, priceSvc);
+    expect(r.total.windowDelta).not.toBeNull();
+    const w = r.total.windowDelta!;
+    expect(w.timeframe).toBe("7d");
+    expect(w.historicalValue).toBe(40000);
+    expect(w.currentValueAtSnapshot).toBe(50000);
+    expect(w.delta).toBe(10000);
+    expect(w.deltaPercent).toBeCloseTo(25, 4);
+    expect(w.pricedSymbols).toBe(1);
+    expect(w.skippedSymbols).toBe(0);
+    expect(r.timeframeNote).toContain("7d");
+    expect(r.timeframeNote).not.toContain("INFORMATIONAL");
+  });
+
+  test("timeframe='24h' resolves to yesterday UTC", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    let observedDateParam: string | null = null;
+    globalThis.fetch = (async (url: string | URL): Promise<Response> => {
+      const u = String(url);
+      const m = u.match(/date=(\d{2}-\d{2}-\d{4})/);
+      if (m) observedDateParam = m[1] ?? null;
+      return new Response(
+        JSON.stringify({ market_data: { current_price: { usd: 50000 } } }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 1, value: 50000 })]),
+        }),
+      },
+    });
+
+    await executeGetPnl({ timeframe: "24h" }, orch, priceSvc);
+    // Should be yesterday's date in DD-MM-YYYY UTC.
+    const now = new Date();
+    const yesterday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 24 * 60 * 60 * 1000);
+    const dd = String(yesterday.getUTCDate()).padStart(2, "0");
+    const mm = String(yesterday.getUTCMonth() + 1).padStart(2, "0");
+    const yyyy = yesterday.getUTCFullYear();
+    const expectedDate: string = `${dd}-${mm}-${yyyy}`;
+    expect(observedDateParam as string | null).toBe(expectedDate);
+  });
+
+  test("Polymarket holdings get skipped (no CoinGecko mapping for prediction shares)", async () => {
+    setupAccount("polymarket:0xabc", "polymarket");
+    mockHistoricalPrice("bitcoin", 40000); // unused — no BTC in this portfolio
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        polymarket: new StubConnector({
+          id: "polymarket",
+          holdingsResult: ok([
+            makeHolding({
+              accountId: "polymarket:0xabc",
+              symbol: "trump-2024:Yes",
+              assetClass: "prediction",
+              quantity: 100,
+              value: 60,
+            }),
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ timeframe: "7d" }, orch, priceSvc);
+    const w = r.total.windowDelta!;
+    expect(w.pricedSymbols).toBe(0);
+    expect(w.skippedSymbols).toBe(0); // assetClass !== "crypto" filter happens before reason logging
+    expect(w.historicalValue).toBe(0);
+    expect(w.delta).toBe(0);
+  });
+
+  test("unknown crypto symbol gets skipped with a reason", async () => {
+    setupAccount("metamask:0xabc", "metamask");
+    mockHistoricalPrice("bitcoin", 40000); // unused
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        metamask: new StubConnector({
+          id: "metamask",
+          holdingsResult: ok([
+            makeHolding({
+              accountId: "metamask:0xabc",
+              symbol: "OBSCURETOKEN",
+              assetClass: "crypto",
+              quantity: 100,
+              value: 50,
+              metadata: { chainId: 1 },
+            }),
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ timeframe: "7d" }, orch, priceSvc);
+    const w = r.total.windowDelta!;
+    expect(w.pricedSymbols).toBe(0);
+    expect(w.skippedSymbols).toBe(1);
+    expect(w.skippedReasons[0]).toContain("OBSCURETOKEN");
+    expect(w.skippedReasons[0]).toContain("no CoinGecko mapping");
+  });
+
+  test("multiple holdings of same symbol share one historical price fetch", async () => {
+    // BTC held in two different accounts. Should only hit the historical
+    // endpoint once (PriceService caches by coinId+date).
+    setupAccount("bybit:UNIFIED", "bybit");
+    setupAccount("metamask:0xabc", "metamask");
+    let calls = 0;
+    globalThis.fetch = (async (): Promise<Response> => {
+      calls++;
+      return new Response(
+        JSON.stringify({ market_data: { current_price: { usd: 40000 } } }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 0.5, value: 25000 })]),
+        }),
+        metamask: new StubConnector({
+          id: "metamask",
+          holdingsResult: ok([makeHolding({ accountId: "metamask:0xabc", symbol: "BTC", quantity: 0.3, value: 15000, metadata: { chainId: 1 } })]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ timeframe: "7d" }, orch, priceSvc);
+    expect(calls).toBe(1);
+    const w = r.total.windowDelta!;
+    expect(w.pricedSymbols).toBe(2);
+    // Historical: 0.5 × 40000 + 0.3 × 40000 = 32000. Current sum: 40000.
+    expect(w.historicalValue).toBe(32000);
+    expect(w.currentValueAtSnapshot).toBe(40000);
+    expect(w.delta).toBe(8000);
+  });
+
+  test("fetch failure for historical price → that holding skipped, not errored", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response("CoinGecko down", { status: 502 });
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 1, value: 50000 })]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ timeframe: "7d" }, orch, priceSvc);
+    const w = r.total.windowDelta!;
+    expect(w.pricedSymbols).toBe(0);
+    expect(w.skippedSymbols).toBe(1);
+    expect(w.skippedReasons[0]).toContain("historical price unavailable");
+    // Result is still well-formed, no thrown error.
+    expect(r.total.currentValue).toBe(50000);
   });
 });

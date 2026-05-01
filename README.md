@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.9.0. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 6 MCP tools, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, 202-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** v0.9.0. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 6 MCP tools, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 210-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -112,6 +112,16 @@ bun run bin/headless-tracker.ts show pnl --include-history=true --method=average
 
 Both methods preserve the "honest unknown" rule: tokens received via wallet transfer-in (no price) produce `realizedPnl: null` for any sell drawing from them — NOT a fabricated number. The realized PnL counts only sales whose every consumed lot had a known cost basis.
 
+### Time-windowed PnL
+
+```bash
+bun run bin/headless-tracker.ts show pnl --timeframe=7d
+bun run bin/headless-tracker.ts show pnl --timeframe=24h
+bun run bin/headless-tracker.ts show pnl --timeframe=ytd
+```
+
+Values your **current basket** at historical CoinGecko prices and reports the delta vs. now. **Approximation:** it does NOT account for trades within the window — it answers "if I held this exact basket N days ago, how much have I gained?" Polymarket positions and crypto without a CoinGecko mapping are skipped (counted in `skippedSymbols`). CoinGecko free-tier historical is daily granularity, so `--timeframe=24h` is "yesterday's close vs now".
+
 ## Custom ERC-20 tokens
 
 The bundled MetaMask token list covers `USDC, USDT, WETH, WBTC, LINK, DAI`. To track project-specific tokens:
@@ -206,7 +216,7 @@ The point of headless-tracker is that you don't write SQL or learn a CLI — you
 
 ```bash
 bun install
-bun test                              # 202 tests, ~15s
+bun test                              # 210 tests, ~15s
 bun run typecheck                     # bun --bun tsc --noEmit
 bun run start                         # start MCP server on stdio (debug only)
 bun run setup bybit                   # interactive credential setup

@@ -2,6 +2,32 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.9.1 — 2026-05-01
+
+Builds on the v0.9.0 `prices.ts` foundation: makes the `timeframe` field on `get_pnl` functional instead of informational.
+
+### Added
+
+- **`get_pnl --timeframe=24h|7d|30d|ytd`** (MCP + CLI) now returns a `windowDelta` block in the result. Computes "current basket valued at historical prices vs now" using CoinGecko's `/coins/{id}/history` endpoint. Honest about the approximation: the value ignores trades within the window (it's "if I held this exact basket N days ago"). Polymarket positions and crypto without a CoinGecko mapping are counted in `skippedSymbols` with human-readable reasons in `skippedReasons`.
+- New helper `computeWindowDelta()` + `timeframeToDate()` in `src/mcp/tools/get_pnl.ts`. CoinGecko free-tier historical is daily granularity, so `24h` resolves to "yesterday UTC". The `PriceService` cache de-dupes per `(coinId, date)`, so multiple holdings of the same symbol across accounts share one fetch.
+- CLI: `show pnl --timeframe=7d` prints a "Window delta" block with historical/current value, delta + percentage, priced/skipped counts, and (for ≤5 skips) the per-symbol reasons.
+
+### Changed
+
+- `executeGetPnl()` signature now accepts an optional `priceService` parameter (third arg) for testability. Defaults to `defaultPriceService()` so existing callers are unaffected.
+- `get_pnl` tool description: removed the "INFORMATIONAL ONLY" warning on `timeframe`. Replaced with the approximation caveat so the LLM communicates "current basket at historical prices, NOT trades within the window" honestly.
+- `timeframeNote` text now reflects the functional behavior when `timeframe ≠ all`.
+
+### Tests
+
+- 8 new tests in `test/mcp/tools/get_pnl.test.ts` (windowDelta with timeframe='all'/none → null, 7d delta math, 24h date resolution, Polymarket skip path, unknown-symbol skip + reason, multi-holding fetch dedup, fetch failure → graceful skip not throw). Updated 1 existing test that asserted the old "informational only" note. 202 → 210 across this release. Typecheck clean.
+
+### Deferred (still not in this release)
+
+- Per-account `windowDelta` (currently total-only). Easy follow-up if a real query needs it.
+- Wiring `prices.ts` into `get_holdings` for snapshot consistency (still uses connector-supplied prices).
+- Larger Bulltrapp ports (Solana, Bitcoin xpub, Coinbase, Binance, Kraken, KuCoin connectors).
+
 ## v0.9.0 — 2026-05-01
 
 Two-commit increment porting useful, low-risk pieces from Bulltrapp (the maintainer's hosted web tracker at [bulltrapp.com](https://bulltrapp.com)) into HeadlessTracker. Additive only: no connector behavior changed, no breaking schema changes. Plan + decision audit at `~/.gstack/projects/HeadlessTracker/main-bulltrapp-port-plan-20260501-162224.md`.

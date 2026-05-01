@@ -1,22 +1,25 @@
 // Tool: get_pnl
 // Aggregates profit/loss across all accounts.
 //
-// V0 caveat: we DON'T compute time-windowed P&L (e.g. "P&L since 7 days ago")
-// because we don't have price history. We surface what each connector already
-// gives us in metadata:
+// Surfaces what each connector already gives us in metadata:
 //   - Bybit:      unrealisedPnl + cumRealisedPnl (per coin)
 //   - Polymarket: cashPnl, realizedPnl, percentPnl (per position)
 //   - MetaMask:   no native P&L (would need cost-basis tracking from tx history)
 //
-// The 'timeframe' input is accepted but currently informational — V0 always
-// returns point-in-time P&L. The description tells the LLM to communicate this
-// honestly to the user instead of fabricating a 7d delta.
+// When `timeframe` is set (e.g. '7d') we ALSO return a `windowDelta` block:
+// the value of each crypto holding's *current quantity* at the historical
+// price `timeframe` ago, vs the same holdings' current value. This is
+// "if I held this exact basket N days ago, how much have I gained?" — NOT
+// the full windowed PnL (it ignores trades within the window). Surfaced
+// honestly so the LLM can communicate the caveat. CoinGecko free-tier
+// historical is daily granularity, so 24h means "yesterday's close".
 
 import { z } from "zod";
 
 import { defaultOrchestrator, type Orchestrator } from "../orchestrator.ts";
 import type { Holding, Transaction } from "../../types.ts";
 import { computeCostBasisWithMethod, type CostBasisMethod } from "../../cost_basis.ts";
+import { defaultPriceService, PriceService, symbolToCoinGeckoId } from "../../prices.ts";
 
 export const GET_PNL_TOOL_NAME = "get_pnl";
 
@@ -34,10 +37,13 @@ export const GET_PNL_DESCRIPTION = [
   "",
   "Inputs (optional):",
   "  - account_id: scope to one account.",
-  "  - timeframe: '24h' | '7d' | '30d' | 'ytd' | 'all'. CURRENTLY INFORMATIONAL ONLY.",
-  "    V0 returns point-in-time P&L based on what each connector reports.",
-  "    True time-windowed P&L requires price history we don't yet store.",
-  "    If the user asks for time-windowed P&L, EXPLAIN this honestly — don't fabricate.",
+  "  - timeframe: '24h' | '7d' | '30d' | 'ytd' | 'all'. When set to anything other",
+  "    than 'all', the result includes a `windowDelta` block computed from CoinGecko",
+  "    historical prices. APPROXIMATION CAVEAT: it values your CURRENT basket at",
+  "    historical prices vs current prices — it does NOT account for trades within",
+  "    the window. Communicate this honestly to the user. Polymarket positions and",
+  "    tokens without a CoinGecko mapping are skipped (counted in `skippedSymbols`).",
+  "    CoinGecko free-tier historical is daily granularity, so '24h' = 'yesterday's close'.",
   "  - include_history (boolean, default false): also pulls transactions and runs",
   "    a cost-basis ledger over them, returning `realizedFromHistory` per",
   "    account + total. Costs an extra round-trip per account but unlocks honest",
@@ -99,6 +105,20 @@ interface AccountPnl {
   notes: string[];
 }
 
+// Time-windowed delta: "current basket valued at historical prices vs now".
+// Per-account null when no priceable holdings (e.g. Polymarket-only).
+export interface WindowDelta {
+  timeframe: "24h" | "7d" | "30d" | "ytd";
+  asOfDate: string;                 // ISO 8601 date of the historical snapshot
+  historicalValue: number;          // sum(quantity × historicalPrice) for priced holdings
+  currentValueAtSnapshot: number;   // sum(holding.value) for the same priced holdings
+  delta: number;                    // currentValueAtSnapshot - historicalValue
+  deltaPercent: number;             // delta / historicalValue × 100 (0 if historicalValue=0)
+  pricedSymbols: number;
+  skippedSymbols: number;
+  skippedReasons: string[];         // e.g. "FOO: no CoinGecko mapping"
+}
+
 export interface GetPnlResult {
   total: {
     currentValue: number;
@@ -111,6 +131,8 @@ export interface GetPnlResult {
       unknownSalesCount: number;
       orphanCount: number;
     } | null;
+    // Populated only when args.timeframe is set and not 'all'.
+    windowDelta: WindowDelta | null;
   };
   byAccount: AccountPnl[];
   failures: Array<{ accountId: string; error: string }>;
@@ -183,7 +205,8 @@ function pnlForAccount(holdings: Holding[]): AccountPnl {
 
 export async function executeGetPnl(
   args: GetPnlArgs,
-  orchestrator: Orchestrator = defaultOrchestrator()
+  orchestrator: Orchestrator = defaultOrchestrator(),
+  priceService: PriceService = defaultPriceService()
 ): Promise<GetPnlResult> {
   const accountIds = args.account_id ? [args.account_id] : undefined;
   const aggregate = await orchestrator.getHoldings(accountIds);
@@ -280,6 +303,23 @@ export async function executeGetPnl(
     totalHistory = { knownRealized, unknownSalesCount, orphanCount };
   }
 
+  // Time-windowed delta. Active iff timeframe is set and != 'all'.
+  // Approximation: values current quantities at historical prices. Doesn't
+  // account for trades within the window. Polymarket positions are skipped
+  // (no CoinGecko mapping for prediction shares). The skippedReasons list lets
+  // the LLM tell the user what's not in the number.
+  let windowDelta: WindowDelta | null = null;
+  let timeframeNote: string;
+  if (args.timeframe && args.timeframe !== "all") {
+    windowDelta = await computeWindowDelta(aggregate.data, args.timeframe, priceService);
+    timeframeNote =
+      `Window delta for '${args.timeframe}' values your CURRENT basket at historical prices ` +
+      `(${windowDelta.asOfDate.slice(0, 10)}) vs now. Does NOT account for trades within the window. ` +
+      `${windowDelta.pricedSymbols} symbol(s) priced, ${windowDelta.skippedSymbols} skipped.`;
+  } else {
+    timeframeNote = "Point-in-time aggregate P&L from connector metadata.";
+  }
+
   return {
     total: {
       currentValue: totalCurrent,
@@ -287,15 +327,98 @@ export async function executeGetPnl(
       unrealizedPnl: totalUnrealized,
       realizedPnl: totalRealized,
       realizedFromHistory: totalHistory,
+      windowDelta,
     },
     byAccount,
     failures: aggregate.failures,
     timeframeRequested: args.timeframe ?? null,
-    timeframeNote:
-      args.timeframe && args.timeframe !== "all"
-        ? `Timeframe '${args.timeframe}' requested but V0 returns point-in-time P&L only. Time-windowed deltas need price history we don't yet store.`
-        : "Point-in-time aggregate P&L from connector metadata.",
+    timeframeNote,
     costBasisMethod: args.include_history ? method : null,
     asOf: new Date().toISOString(),
+  };
+}
+
+// Resolve a timeframe label to a UTC Date for the historical snapshot.
+// CoinGecko free historical is daily granularity, so we trim time-of-day
+// to start-of-UTC-day for stable cache keys.
+function timeframeToDate(timeframe: "24h" | "7d" | "30d" | "ytd"): Date {
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  switch (timeframe) {
+    case "24h": return new Date(todayUtc - 1 * 24 * 60 * 60 * 1000);
+    case "7d":  return new Date(todayUtc - 7 * 24 * 60 * 60 * 1000);
+    case "30d": return new Date(todayUtc - 30 * 24 * 60 * 60 * 1000);
+    case "ytd": return new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  }
+}
+
+async function computeWindowDelta(
+  holdings: Holding[],
+  timeframe: "24h" | "7d" | "30d" | "ytd",
+  priceService: PriceService
+): Promise<WindowDelta> {
+  const date = timeframeToDate(timeframe);
+
+  // Collect priceable crypto holdings. Skip non-crypto (predictions/cash/stocks)
+  // and crypto without a CoinGecko mapping.
+  interface PriceableHolding {
+    coinId: string;
+    quantity: number;
+    currentValue: number;
+  }
+  const priceable: PriceableHolding[] = [];
+  const skippedReasons: string[] = [];
+
+  for (const h of holdings) {
+    if (h.assetClass !== "crypto") continue;
+    if (h.quantity === undefined || h.quantity <= 0) continue;
+    if (h.value === undefined) continue;
+    const coinId = symbolToCoinGeckoId(h.symbol);
+    if (!coinId) {
+      skippedReasons.push(`${h.symbol}: no CoinGecko mapping (extend prices.ts COINGECKO_IDS to support)`);
+      continue;
+    }
+    priceable.push({ coinId, quantity: h.quantity, currentValue: h.value });
+  }
+
+  // De-dupe coin ids and fetch historical prices in parallel. The PriceService
+  // caches per (coin, date), so multiple holdings of the same symbol share one fetch.
+  const uniqueCoins = Array.from(new Set(priceable.map((p) => p.coinId)));
+  const priceMap = new Map<string, number>();
+  await Promise.all(
+    uniqueCoins.map(async (coinId) => {
+      const r = await priceService.getHistoricalPrice(coinId, date);
+      if (r.ok && r.value !== null) {
+        priceMap.set(coinId, r.value);
+      }
+    })
+  );
+
+  let historicalValue = 0;
+  let currentValueAtSnapshot = 0;
+  let pricedSymbols = 0;
+
+  for (const p of priceable) {
+    const histPrice = priceMap.get(p.coinId);
+    if (histPrice === undefined) {
+      skippedReasons.push(`${p.coinId}: historical price unavailable for ${timeframe} ago`);
+      continue;
+    }
+    historicalValue += p.quantity * histPrice;
+    currentValueAtSnapshot += p.currentValue;
+    pricedSymbols++;
+  }
+
+  const delta = currentValueAtSnapshot - historicalValue;
+  return {
+    timeframe,
+    asOfDate: date.toISOString(),
+    historicalValue,
+    currentValueAtSnapshot,
+    delta,
+    deltaPercent: historicalValue > 0 ? (delta / historicalValue) * 100 : 0,
+    pricedSymbols,
+    skippedSymbols: skippedReasons.length,
+    skippedReasons,
   };
 }

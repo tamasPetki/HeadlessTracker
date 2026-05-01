@@ -56,6 +56,7 @@ Show examples:
   headless-tracker show holdings --currency=HUF
   headless-tracker show pnl
   headless-tracker show pnl --include-history=true --method=average
+  headless-tracker show pnl --timeframe=7d
   headless-tracker show transactions --since=7d
   headless-tracker show transactions --account-id=metamask:0xabc --since=24h
 
@@ -586,6 +587,20 @@ async function showPnl(args: string[]): Promise<void> {
     console.log(`  realized (known cost basis): ${fmtUsd(h.knownRealized)}`);
     console.log(`  sales with unknown cost:     ${h.unknownSalesCount}`);
     console.log(`  orphan events:               ${h.orphanCount}`);
+  }
+  if (result.total.windowDelta) {
+    const w = result.total.windowDelta;
+    const sign = w.delta >= 0 ? "+" : "";
+    console.log(`\nWindow delta (${w.timeframe}, since ${w.asOfDate.slice(0, 10)}):`);
+    console.log(`  historical value:    ${fmtUsd(w.historicalValue)}`);
+    console.log(`  current value:       ${fmtUsd(w.currentValueAtSnapshot)} (priced subset only)`);
+    console.log(`  delta:               ${sign}${fmtUsd(w.delta)} (${sign}${w.deltaPercent.toFixed(2)}%)`);
+    console.log(`  priced / skipped:    ${w.pricedSymbols} priced, ${w.skippedSymbols} skipped`);
+    if (w.skippedSymbols > 0 && w.skippedReasons.length <= 5) {
+      for (const r of w.skippedReasons) console.log(`    - ${r}`);
+    } else if (w.skippedSymbols > 0) {
+      console.log(`    (${w.skippedReasons.length} skipped — see JSON output for full list)`);
+    }
   }
   console.log(`\n${result.timeframeNote}`);
   // Surface per-account notes (e.g. "MetaMask doesn't track cost basis").
