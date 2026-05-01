@@ -16,7 +16,7 @@ import { z } from "zod";
 
 import { defaultOrchestrator, type Orchestrator } from "../orchestrator.ts";
 import type { Holding, Transaction } from "../../types.ts";
-import { computeCostBasis } from "../../cost_basis.ts";
+import { computeCostBasisWithMethod, type CostBasisMethod } from "../../cost_basis.ts";
 
 export const GET_PNL_TOOL_NAME = "get_pnl";
 
@@ -39,30 +39,40 @@ export const GET_PNL_DESCRIPTION = [
   "    True time-windowed P&L requires price history we don't yet store.",
   "    If the user asks for time-windowed P&L, EXPLAIN this honestly — don't fabricate.",
   "  - include_history (boolean, default false): also pulls transactions and runs",
-  "    a FIFO cost-basis ledger over them, returning `realizedFromHistory` per",
+  "    a cost-basis ledger over them, returning `realizedFromHistory` per",
   "    account + total. Costs an extra round-trip per account but unlocks honest",
   "    realized PnL on tokens born on-chain (LP rewards, swaps, native airdrops).",
   "    Tokens that arrived via wallet transfer-in (no price) get `unknownSalesCount`",
   "    not inflated knownRealized — explicit honesty about what cost basis we know.",
   "    POLYMARKET-SPECIFIC: when include_history=true, the Polymarket account's",
-  "    realizedPnl is replaced by the FIFO-from-/trades number. Default mode leaves",
+  "    realizedPnl is replaced by the cost-basis-from-/trades number. Default mode leaves",
   "    Polymarket realizedPnl null because the connector's cashPnl mixes realized",
   "    + unrealized — set include_history=true to get the real realized number.",
+  "  - method ('fifo' | 'average', default 'fifo'): cost basis method used when",
+  "    include_history=true. FIFO consumes oldest lot first per sell; Average Cost",
+  "    pools all priced acquisitions and sells out at the running average. If the",
+  "    user mentions 'average cost' / 'avg cost' / 'weighted', use 'average'.",
+  "    Both methods preserve the 'honest unknown' rule: any sell drawing from an",
+  "    unpriced deposit/transfer returns realizedPnl=null, NOT a fabricated number.",
+  "    Has NO effect when include_history=false.",
 ].join(" ");
 
 export const GET_PNL_INPUT_SCHEMA = {
   account_id: z.string().optional(),
   timeframe: z.enum(["24h", "7d", "30d", "ytd", "all"]).optional(),
   include_history: z.boolean().optional(),
+  method: z.enum(["fifo", "average"]).optional(),
 };
 
 export interface GetPnlArgs {
   account_id?: string;
   timeframe?: "24h" | "7d" | "30d" | "ytd" | "all";
-  // When true, also fetches transactions and runs FIFO cost-basis through
-  // them. Surfaces a `realizedFromHistory` block per account. Costs an extra
+  // When true, also fetches transactions and runs cost-basis through them.
+  // Surfaces a `realizedFromHistory` block per account. Costs an extra
   // round-trip per account (transactions endpoint), so it's opt-in.
   include_history?: boolean;
+  // Cost basis method. Default 'fifo'. Only meaningful when include_history=true.
+  method?: CostBasisMethod;
 }
 
 interface AccountPnl {
@@ -106,6 +116,8 @@ export interface GetPnlResult {
   failures: Array<{ accountId: string; error: string }>;
   timeframeRequested: string | null;
   timeframeNote: string;
+  // Echoes back the cost-basis method actually used. null when include_history=false.
+  costBasisMethod: CostBasisMethod | null;
   asOf: string;
 }
 
@@ -194,6 +206,7 @@ export async function executeGetPnl(
   // sales (e.g. on-chain ERC-20 transfers without price) propagate as
   // `unknownSalesCount`, NOT inflated into knownRealized — that's the whole
   // point of the "honest cost basis" framing.
+  const method: CostBasisMethod = args.method ?? "fifo";
   if (args.include_history) {
     const txAggregate = await orchestrator.getTransactions(accountIds, undefined);
     const byAccountTx = new Map<string, Transaction[]>();
@@ -204,13 +217,13 @@ export async function executeGetPnl(
     }
     for (const account of byAccount) {
       const txs = byAccountTx.get(account.accountId) ?? [];
-      const cb = computeCostBasis(txs);
+      const cb = computeCostBasisWithMethod(txs, method);
       account.realizedFromHistory = {
         knownRealized: cb.totals.realizedKnown,
         unknownSalesCount: cb.totals.realizedUnknownCount,
         orphanCount: cb.totals.orphanCount,
       };
-      // Polymarket: the canonical realized PnL is the FIFO-from-trades number.
+      // Polymarket: the canonical realized PnL is the cost-basis-from-trades number.
       // Promote it into account.realizedPnl (overriding the null we left there
       // in pnlForAccount). Bybit and MetaMask keep whatever pnlForAccount set
       // because their metadata-based realized is already trusted.
@@ -219,10 +232,11 @@ export async function executeGetPnl(
         account.realizedPnl = cb.totals.realizedKnown;
         // Drop the "by default null" note now that we have an actual number.
         account.notes = account.notes.filter((n) => !n.includes("Polymarket realized PnL is null by default"));
+        const methodLabel = method === "average" ? "Average Cost" : "FIFO";
         account.notes.push(
-          `Polymarket realizedPnl computed from ${cb.realizedSales.length} trade event(s) via FIFO over /trades.`
+          `Polymarket realizedPnl computed from ${cb.realizedSales.length} trade event(s) via ${methodLabel} over /trades.`
         );
-        // Fold the previous (probably zero) into nothing — the FIFO replaces it.
+        // Fold the previous (probably zero) into nothing — the cost basis replaces it.
         void previousRealized;
       }
       if (cb.totals.realizedUnknownCount > 0) {
@@ -281,6 +295,7 @@ export async function executeGetPnl(
       args.timeframe && args.timeframe !== "all"
         ? `Timeframe '${args.timeframe}' requested but V0 returns point-in-time P&L only. Time-windowed deltas need price history we don't yet store.`
         : "Point-in-time aggregate P&L from connector metadata.",
+    costBasisMethod: args.include_history ? method : null,
     asOf: new Date().toISOString(),
   };
 }

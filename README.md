@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.8.0. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 6 MCP tools, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO cost-basis on transaction history, 162-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** v0.9.0. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 6 MCP tools, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, 202-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -87,13 +87,30 @@ bun run bin/headless-tracker.ts show transactions --since=7d
 
 Each prints a text table. Filters work: `show holdings --account-id=bybit:UNIFIED`, `show holdings --asset-class=crypto`, `show transactions --since=24h --account-id=metamask:0xabc`.
 
-For honest realized P&L based on FIFO over your transaction history (not connector metadata which can mix realized + unrealized for prediction markets):
+### Multi-currency display
+
+`show holdings` defaults to USD. Pass `--currency=` for live FX-converted values:
+
+```bash
+bun run bin/headless-tracker.ts show holdings --currency=HUF
+bun run bin/headless-tracker.ts show holdings --currency=EUR
+```
+
+FX rates come from a free public API (`exchangerate-api.com`) with `frankfurter.dev` as fallback, plus a static fallback if both fail (which surfaces as a warning so you know the displayed numbers may be a few percent stale). Supported: `USD`, `EUR`, `GBP`, `HUF`.
+
+### Cost basis methods (FIFO vs Average)
+
+For honest realized P&L based on your transaction history (not connector metadata which can mix realized + unrealized for prediction markets):
 
 ```bash
 bun run bin/headless-tracker.ts show pnl --include-history=true
+bun run bin/headless-tracker.ts show pnl --include-history=true --method=average
 ```
 
-This pulls trades and runs a FIFO cost-basis ledger. Tokens received via wallet transfer-in (no price) get `unknownSalesCount`, NOT inflated into the realized number — explicit honesty about what cost basis we actually know.
+`--method=fifo` (default): consumes the oldest lot first per sell.
+`--method=average`: pools all priced acquisitions; sells out at the running weighted average.
+
+Both methods preserve the "honest unknown" rule: tokens received via wallet transfer-in (no price) produce `realizedPnl: null` for any sell drawing from them — NOT a fabricated number. The realized PnL counts only sales whose every consumed lot had a known cost basis.
 
 ## Custom ERC-20 tokens
 
@@ -189,7 +206,7 @@ The point of headless-tracker is that you don't write SQL or learn a CLI — you
 
 ```bash
 bun install
-bun test                              # 99 tests, ~1.5s
+bun test                              # 202 tests, ~15s
 bun run typecheck                     # bun --bun tsc --noEmit
 bun run start                         # start MCP server on stdio (debug only)
 bun run setup bybit                   # interactive credential setup

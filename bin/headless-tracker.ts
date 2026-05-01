@@ -53,7 +53,9 @@ Show examples:
   headless-tracker show holdings
   headless-tracker show holdings --account-id=bybit:UNIFIED
   headless-tracker show holdings --asset-class=crypto
+  headless-tracker show holdings --currency=HUF
   headless-tracker show pnl
+  headless-tracker show pnl --include-history=true --method=average
   headless-tracker show transactions --since=7d
   headless-tracker show transactions --account-id=metamask:0xabc --since=24h
 
@@ -474,6 +476,24 @@ function fmtUsd(n: number | undefined): string {
   return `${sign}$${abs.toFixed(4)}`;
 }
 
+// Currency-aware money formatter. HUF gets no decimals (forint convention).
+// Symbol style: USD/EUR/GBP prefix, HUF suffix (Ft is more readable than HUF prefix).
+function fmtMoney(n: number | undefined, currency: "USD" | "EUR" | "GBP" | "HUF"): string {
+  if (n === undefined || !Number.isFinite(n)) return "—";
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (currency === "HUF") {
+    // HUF is large-numbered and has no fractional convention.
+    if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M Ft`;
+    if (abs >= 1000) return `${sign}${abs.toFixed(0)} Ft`;
+    return `${sign}${abs.toFixed(0)} Ft`;
+  }
+  const symbol = currency === "USD" ? "$" : currency === "EUR" ? "€" : "£";
+  if (abs >= 1000) return `${sign}${symbol}${abs.toFixed(0)}`;
+  if (abs >= 1) return `${sign}${symbol}${abs.toFixed(2)}`;
+  return `${sign}${symbol}${abs.toFixed(4)}`;
+}
+
 function fmtQty(n: number | undefined): string {
   if (n === undefined || !Number.isFinite(n)) return "—";
   if (Math.abs(n) >= 1000) return n.toFixed(2);
@@ -483,9 +503,13 @@ function fmtQty(n: number | undefined): string {
 
 async function showHoldings(args: string[]): Promise<void> {
   const flags = parseFlags(args);
+  const currencyFlag = (flags["currency"] ?? "").toUpperCase();
+  const validCurrency: "USD" | "EUR" | "GBP" | "HUF" =
+    currencyFlag === "EUR" || currencyFlag === "GBP" || currencyFlag === "HUF" ? currencyFlag : "USD";
   const result = await executeGetHoldings({
     account_id: flags["account-id"],
     asset_class: flags["asset-class"] as "crypto" | "stock" | "prediction" | "cash" | undefined,
+    currency: validCurrency,
   });
 
   if (result.holdings.length === 0) {
@@ -501,12 +525,16 @@ async function showHoldings(args: string[]): Promise<void> {
       h.symbol,
       h.assetClass,
       fmtQty(h.quantity),
-      fmtUsd(h.value),
-      h.currentPrice !== undefined ? fmtUsd(h.currentPrice) : "—",
+      fmtMoney(h.value, validCurrency),
+      h.currentPrice !== undefined ? fmtMoney(h.currentPrice, validCurrency) : "—",
     ]);
     console.log(renderTable(["account", "symbol", "class", "qty", "value", "price"], rows));
     const total = result.holdings.reduce((s, h) => s + (h.value ?? 0), 0);
-    console.log(`\nTotal: ${fmtUsd(total)}  (${result.holdings.length} positions across ${result.meta.accountsWithData} accounts)`);
+    console.log(`\nTotal: ${fmtMoney(total, validCurrency)}  (${result.holdings.length} positions across ${result.meta.accountsWithData} accounts)`);
+    if (result.meta.fx) {
+      const r = result.meta.fx.rateUsdToTarget.toFixed(4);
+      console.log(`FX: 1 USD = ${r} ${result.meta.fx.targetCurrency} (source: ${result.meta.fx.source})`);
+    }
   }
 
   if (result.warnings.length > 0) {
@@ -524,10 +552,13 @@ async function showPnl(args: string[]): Promise<void> {
   const tf = flags["timeframe"];
   const validTf = tf === "24h" || tf === "7d" || tf === "30d" || tf === "ytd" || tf === "all" ? tf : undefined;
   const includeHistory = flags["include-history"] === "true" || flags["include-history"] === "";
+  const methodFlag = flags["method"];
+  const validMethod = methodFlag === "fifo" || methodFlag === "average" ? methodFlag : undefined;
   const result = await executeGetPnl({
     account_id: flags["account-id"],
     timeframe: validTf,
     include_history: includeHistory,
+    method: validMethod,
   });
 
   if (result.byAccount.length === 0) {
@@ -550,7 +581,8 @@ async function showPnl(args: string[]): Promise<void> {
   console.log(`  realized PnL:   ${fmtUsd(result.total.realizedPnl)}`);
   if (result.total.realizedFromHistory) {
     const h = result.total.realizedFromHistory;
-    console.log(`\nFrom transaction history (FIFO cost basis):`);
+    const methodLabel = result.costBasisMethod === "average" ? "Average Cost" : "FIFO";
+    console.log(`\nFrom transaction history (${methodLabel} cost basis):`);
     console.log(`  realized (known cost basis): ${fmtUsd(h.knownRealized)}`);
     console.log(`  sales with unknown cost:     ${h.unknownSalesCount}`);
     console.log(`  orphan events:               ${h.orphanCount}`);

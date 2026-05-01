@@ -164,3 +164,97 @@ describe("executeGetHoldings", () => {
     }
   });
 });
+
+// Currency conversion path is exercised against the real fetchFxRates() in fx.ts.
+// We stub fetch directly so no network is hit and we can simulate fallback behavior.
+describe("executeGetHoldings — currency conversion", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test("currency='USD' (default) → no FX fetch, no fx meta", async () => {
+    let fetchCalls = 0;
+    globalThis.fetch = (async (): Promise<Response> => {
+      fetchCalls++;
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const result = await executeGetHoldings({}, orch);
+    expect(fetchCalls).toBe(0);
+    expect(result.meta.scope.currency).toBe("USD");
+    expect(result.meta.fx).toBeUndefined();
+    // Holdings unchanged.
+    expect(result.holdings.find((h) => h.symbol === "BTC")?.value).toBe(30000);
+  });
+
+  test("currency='HUF' converts USD values + populates meta.fx", async () => {
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify({ rates: { EUR: 0.92, GBP: 0.79, HUF: 380 } }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await executeGetHoldings({ currency: "HUF" }, orch);
+    expect(result.meta.scope.currency).toBe("HUF");
+    expect(result.meta.fx).toBeDefined();
+    expect(result.meta.fx!.targetCurrency).toBe("HUF");
+    expect(result.meta.fx!.source).toBe("exchangerate-api");
+    expect(result.meta.fx!.rateUsdToTarget).toBe(380);
+
+    const btc = result.holdings.find((h) => h.symbol === "BTC")!;
+    expect(btc.value).toBe(30000 * 380);
+    expect(btc.valueCurrency).toBe("HUF");
+  });
+
+  test("currency='EUR' divides USD by EUR rate (1 USD = 0.92 EUR)", async () => {
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify({ rates: { EUR: 0.92, GBP: 0.79, HUF: 380 } }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await executeGetHoldings({ currency: "EUR" }, orch);
+    const btc = result.holdings.find((h) => h.symbol === "BTC")!;
+    expect(btc.value).toBeCloseTo(30000 * 0.92, 4);
+    expect(btc.valueCurrency).toBe("EUR");
+  });
+
+  test("FX fallback path surfaces a warning", async () => {
+    // Both upstream APIs fail → fetchFxRates returns ok({source: 'fallback'}).
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response("nope", { status: 502 });
+    }) as unknown as typeof fetch;
+
+    const result = await executeGetHoldings({ currency: "HUF" }, orch);
+    expect(result.meta.fx?.source).toBe("fallback");
+    expect(result.warnings.some((w) => w.includes("static fallback"))).toBe(true);
+    // Conversion still happens with fallback rate (380 HUF default).
+    const btc = result.holdings.find((h) => h.symbol === "BTC")!;
+    expect(btc.value).toBe(30000 * 380);
+  });
+
+  test("does NOT mutate cached Holding objects (subsequent USD call returns USD)", async () => {
+    // Critical: the currency conversion must happen at response-build time, NOT
+    // by mutating the orchestrator's cached Holdings — otherwise the next call
+    // would see HUF-tagged values where it expected USD.
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify({ rates: { EUR: 0.92, GBP: 0.79, HUF: 380 } }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const hufResult = await executeGetHoldings({ currency: "HUF" }, orch);
+    expect(hufResult.holdings.find((h) => h.symbol === "BTC")?.value).toBe(30000 * 380);
+
+    const usdResult = await executeGetHoldings({}, orch);
+    expect(usdResult.meta.scope.currency).toBe("USD");
+    expect(usdResult.meta.fx).toBeUndefined();
+    // Underlying value still the original USD number.
+    expect(usdResult.holdings.find((h) => h.symbol === "BTC")?.value).toBe(30000);
+    expect(usdResult.holdings.find((h) => h.symbol === "BTC")?.valueCurrency).toBe("USD");
+  });
+});

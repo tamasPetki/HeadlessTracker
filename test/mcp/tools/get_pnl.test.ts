@@ -267,4 +267,81 @@ describe("executeGetPnl", () => {
     expect(account.realizedFromHistory!.unknownSalesCount).toBe(1);
     expect(account.notes.join(" ")).toContain("unknown cost basis");
   });
+
+  test("method='average' uses Average Cost over /trades (different result vs FIFO)", async () => {
+    // Two BUYs at 0.30 and 0.50, then SELL of all 150 at 0.70.
+    // FIFO: cost=100×0.30 + 50×0.50 = 55. Realized = 105 - 55 = 50.
+    // Average: avg=(30+25)/150 = 0.3667. Cost=150×0.3667 = 55. Realized = 50.
+    // Same result for full exit. Use a partial exit to differentiate:
+    // SELL only 100 — FIFO uses oldest 100 @ 0.30; Average uses avg 0.3667.
+    setupAccount("polymarket:0xabc", "polymarket");
+    const txs = [
+      { accountId: "polymarket:0xabc", txId: "b1", type: "buy" as const, symbol: "X:Yes", quantity: 100, price: 0.30, timestamp: 1000 },
+      { accountId: "polymarket:0xabc", txId: "b2", type: "buy" as const, symbol: "X:Yes", quantity: 50, price: 0.50, timestamp: 2000 },
+      { accountId: "polymarket:0xabc", txId: "s1", type: "sell" as const, symbol: "X:Yes", quantity: 100, price: 0.70, timestamp: 3000 },
+    ];
+    const buildOrch = () => new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        polymarket: new StubConnector({
+          id: "polymarket",
+          holdingsResult: ok([
+            makeHolding({
+              accountId: "polymarket:0xabc",
+              symbol: "X:Yes",
+              assetClass: "prediction",
+              quantity: 50,
+              value: 35,
+              metadata: { eventSlug: "X", outcome: "Yes" },
+            }),
+          ]),
+          transactionsResult: ok(txs),
+        }),
+      },
+    });
+
+    const fifoResult = await executeGetPnl({ include_history: true, method: "fifo" }, buildOrch());
+    const fifoAccount = fifoResult.byAccount[0]!;
+    // FIFO: 100 @ 0.30 cost → realized = 100×0.70 - 100×0.30 = 40.
+    expect(fifoAccount.realizedPnl).toBeCloseTo(40, 6);
+    expect(fifoResult.costBasisMethod).toBe("fifo");
+
+    // Reset cache so the second orchestrator doesn't hit a stale fetch.
+    cache.invalidateAll();
+
+    const avgResult = await executeGetPnl({ include_history: true, method: "average" }, buildOrch());
+    const avgAccount = avgResult.byAccount[0]!;
+    // Average cost: (100×0.30 + 50×0.50) / 150 = 55/150 ≈ 0.3667.
+    // Realized = 100×0.70 - 100×0.3667 ≈ 70 - 36.67 = 33.33.
+    expect(avgAccount.realizedPnl).toBeCloseTo(33.333333, 4);
+    expect(avgResult.costBasisMethod).toBe("average");
+    // Note text mentions Average Cost when method=average.
+    expect(avgAccount.notes.join(" ")).toContain("Average Cost");
+  });
+
+  test("costBasisMethod is null when include_history=false", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: { bybit: new StubConnector({ id: "bybit", holdingsResult: ok([]) }) },
+    });
+    const result = await executeGetPnl({}, orch);
+    expect(result.costBasisMethod).toBeNull();
+  });
+
+  test("default method is fifo when include_history=true and method omitted", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([]),
+          transactionsResult: ok([]),
+        }),
+      },
+    });
+    const result = await executeGetPnl({ include_history: true }, orch);
+    expect(result.costBasisMethod).toBe("fifo");
+  });
 });
