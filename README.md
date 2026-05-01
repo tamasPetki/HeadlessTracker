@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.9.0. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 6 MCP tools, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 210-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** v0.9.2. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 6 MCP tools, 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 224-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -74,6 +74,40 @@ Open a new conversation in Claude Desktop:
 > Show my Polymarket positions sorted by current value.
 
 If Claude doesn't see the tools, check `~/Library/Logs/Claude/mcp-server-headless-tracker.log`.
+
+### 5. Use the preset prompts (one-click dashboards)
+
+The MCP server ships three prompt templates. They show up in Claude Desktop's prompt picker (the `/` or attachment menu, depending on version) and in Claude Code as slash commands. Each one steers Claude through a specific multi-tool workflow:
+
+| Prompt | What it does |
+|--------|--------------|
+| `portfolio-dashboard` | Calls `get_holdings` + `get_allocations` + `get_pnl` + `get_polymarket_positions` in parallel and renders a complete multi-section dashboard (HTML artifact when supported). |
+| `weekly-review` | 7-day window delta + biggest movers + recent trades + one observation. Approximation caveat surfaced honestly (current basket at historical prices, NOT trades within the window). |
+| `risk-check` | Concentration / venue / stablecoin reserve / prediction-market overweight / chain concentration. Each dimension scored PASS / WARN / ALERT with the actual percentages. |
+
+You can also paste any of these prompts directly — they're plain text. See the cookbook below.
+
+## Prompt cookbook
+
+Copy-paste these into any MCP-aware client. Each one expects the headless-tracker MCP server to be configured. None of them require new code on the server side.
+
+**Quick "where do I stand"**
+> Build me a complete portfolio dashboard. Call get_holdings, get_allocations (by asset_class and by symbol), get_pnl, and get_polymarket_positions in parallel and synthesize a single dashboard artifact. Show top 10 positions, asset-class breakdown, total PnL. Be honest about NULL fields — don't fabricate.
+
+**Quick "how was this week"**
+> Give me a 7-day review. Call get_pnl with timeframe=7d, get_holdings, and get_transactions with since=7d. Surface windowDelta with the approximation caveat ("current basket at historical prices, not trades within the window"), list the trades by exchange, and end with one short observation about what drove the change.
+
+**Quick "should I be worried"**
+> Risk check my portfolio. Call get_holdings and get_allocations (by symbol, by asset_class, by connector). Score each: single-position concentration (ALERT > 40%), venue concentration (ALERT > 70%), stablecoin reserve (WARN < 5%, ALERT = 0%), prediction-market overweight (WARN > 15%). Output as a markdown table.
+
+**Tax season**
+> I need to do my taxes. Call get_transactions for the past year (since=365d). Then call get_pnl with include_history=true and method=fifo. Group realized PnL by symbol and by month. Flag any sales with unknown cost basis (deposits / transfers without price) — those are honest gaps I'll have to research separately.
+
+**HUF view (or EUR / GBP)**
+> Show my portfolio in Hungarian forint. Call get_holdings with currency=HUF. Sort by value descending. Sum the total in HUF and tell me whether the FX source was the live API or the static fallback.
+
+**Polymarket bet review**
+> Walk me through my Polymarket positions. Call get_polymarket_positions with group_by_event=true. Then call get_pnl with include_history=true to get realized PnL via FIFO over /trades. For each event, show: title, my outcome holdings, current value, realized PnL so far, and end date. Flag any redeemable positions I should claim.
 
 ## Quick portfolio queries from the CLI (no Claude required)
 
@@ -216,7 +250,7 @@ The point of headless-tracker is that you don't write SQL or learn a CLI — you
 
 ```bash
 bun install
-bun test                              # 210 tests, ~15s
+bun test                              # 224 tests, ~15s
 bun run typecheck                     # bun --bun tsc --noEmit
 bun run start                         # start MCP server on stdio (debug only)
 bun run setup bybit                   # interactive credential setup

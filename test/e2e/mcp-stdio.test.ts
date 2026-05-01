@@ -259,7 +259,12 @@ describe("E2E: MCP stdio server", () => {
     expect(parsed.meta.sinceResolved).toBeTruthy();
     const sinceMs = new Date(parsed.meta.sinceResolved).getTime();
     const sevenDays = 7 * 24 * 3600 * 1000;
-    expect(Math.abs(Date.now() - sinceMs - sevenDays)).toBeLessThan(5000);
+    // The drift is "wall time between server resolving 'now' and the client
+    // re-measuring it after the round-trip" — server cold-start + SDK load +
+    // JSON-RPC + orchestrator fan-out. 30s is generous but covers slow CI
+    // boxes; tighter thresholds make this test flake (was 5s, observed 7.8s
+    // after adding prompts which marginally slowed boot).
+    expect(Math.abs(Date.now() - sinceMs - sevenDays)).toBeLessThan(30_000);
   });
 
   test("unknown tool name returns JSON-RPC error", async () => {

@@ -46,14 +46,29 @@ import {
   GET_ALLOCATIONS_INPUT_SCHEMA,
   executeGetAllocations,
 } from "./tools/get_allocations.ts";
+import {
+  DASHBOARD_PROMPT_NAME,
+  DASHBOARD_PROMPT_CONFIG,
+  buildDashboardPrompt,
+} from "./prompts/dashboard.ts";
+import {
+  WEEKLY_REVIEW_PROMPT_NAME,
+  WEEKLY_REVIEW_PROMPT_CONFIG,
+  buildWeeklyReviewPrompt,
+} from "./prompts/weekly_review.ts";
+import {
+  RISK_CHECK_PROMPT_NAME,
+  RISK_CHECK_PROMPT_CONFIG,
+  buildRiskCheckPrompt,
+} from "./prompts/risk_check.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.8.0";
+const SERVER_VERSION = "0.9.2";
 
 export function createMcpServer(): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: {} } }
+    { capabilities: { tools: {}, prompts: {} } }
   );
 
   // Note: using the `tool()` API (marked @deprecated in SDK 1.29 in favor of
@@ -133,6 +148,14 @@ export function createMcpServer(): McpServer {
       };
     }
   );
+
+  // Preset prompts. Surface in Claude Desktop / Claude Code as one-click
+  // templates for the most common multi-tool queries. The handlers are
+  // pure (no upstream API calls) — they just emit the prompt text. Claude
+  // executes the tools described inside the prompt body.
+  server.registerPrompt(DASHBOARD_PROMPT_NAME, DASHBOARD_PROMPT_CONFIG, () => buildDashboardPrompt());
+  server.registerPrompt(WEEKLY_REVIEW_PROMPT_NAME, WEEKLY_REVIEW_PROMPT_CONFIG, () => buildWeeklyReviewPrompt());
+  server.registerPrompt(RISK_CHECK_PROMPT_NAME, RISK_CHECK_PROMPT_CONFIG, () => buildRiskCheckPrompt());
 
   return server;
 }

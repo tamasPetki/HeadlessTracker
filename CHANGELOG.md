@@ -2,6 +2,33 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.9.2 — 2026-05-01
+
+Adds **MCP prompts** — preset prompt templates the server exposes alongside its tools. They show up as slash-command-style entries in Claude Desktop's prompt picker (and in Claude Code) so the user doesn't have to remember which tools to call together for the common workflows. Pure additive: zero changes to existing tools or CLI behavior.
+
+### Added
+
+- **3 MCP prompts** registered via `server.registerPrompt()`:
+  - `portfolio-dashboard` — calls `get_holdings` + `get_allocations` + `get_pnl` + `get_polymarket_positions` in parallel and renders a complete multi-section dashboard (HTML artifact when the client supports it).
+  - `weekly-review` — calls `get_pnl` with `timeframe=7d`, `get_holdings`, and `get_transactions` with `since=7d`. Surfaces the windowDelta approximation caveat honestly (current basket at historical prices, NOT trades within the window).
+  - `risk-check` — concentration / venue / stablecoin reserve / prediction-market overweight / chain-concentration audit, each scored PASS / WARN / ALERT.
+- New `src/mcp/prompts/` directory with one file per prompt (`dashboard.ts`, `weekly_review.ts`, `risk_check.ts`). Each file exports the prompt name, a config object (title + description), and a builder function returning `GetPromptResult`. Pure functions — no upstream API calls in the prompt handlers themselves; Claude executes the tools described in the prompt body.
+- `prompts: {}` capability in the McpServer constructor.
+- README "Prompt cookbook" section with 6 copy-paste prompts (dashboard, weekly review, risk check, tax season, HUF view, Polymarket bet review). The first three mirror the registered prompts; the rest are for users who want to paste a prompt directly without going through the picker.
+
+### Changed
+
+- README status line: 210 → 224 tests, mentions 3 MCP prompts.
+- `SERVER_VERSION` constant in `src/mcp/server.ts`: 0.8.0 → 0.9.2 (was stale through v0.9.0 / v0.9.1 — caught and fixed in this release).
+
+### Tests
+
+- New `test/mcp/prompts.test.ts` with 14 tests (per-prompt: stable name, config has title + description, builder returns single user-message + text content, prompt body steers toward the right tools, honesty/caveat language is present; plus one server-construction smoke test that verifies registerPrompt() args don't throw at construction time). 210 → 224 tests, typecheck clean.
+
+### Why MCP prompts and not a separate plugin
+
+Looked at three options for "preset workflows": a Claude Code plugin / skill bundle, MCP prompts, README-only copy-paste. MCP prompts won because they ship inside the existing server (no second install), work in both Claude Desktop and Claude Code, and the protocol already supports them. The README cookbook is the third (zero-code) option and ships alongside.
+
 ## v0.9.1 — 2026-05-01
 
 Builds on the v0.9.0 `prices.ts` foundation: makes the `timeframe` field on `get_pnl` functional instead of informational.
