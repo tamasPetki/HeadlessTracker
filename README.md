@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.10.1. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 7 MCP tools (6 data + `render_dashboard` MCP App), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 233-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** v0.10.2. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 7 MCP tools (6 data + `render_dashboard` MCP App), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 233-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -25,7 +25,7 @@ For hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/app
 
 The host renders a sandboxed iframe in the chat panel with three live tabs:
 
-- **Portfolio** — total value KPIs, asset-class donut chart, top positions table, top-by-symbol bar chart, warnings + failures
+- **Portfolio** — total value KPIs, top positions table, allocation-by-symbol donut (top 7 + "Other" tail), warnings + failures
 - **Weekly** — 7-day window delta KPIs, recent trades table, skipped-symbols disclosure (with reasons)
 - **Risk** — concentration audit (single-position, venue, stablecoin reserve, prediction-market overweight) scored PASS / WARN / ALERT, by-venue donut
 

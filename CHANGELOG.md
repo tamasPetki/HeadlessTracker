@@ -2,6 +2,26 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.10.2 — 2026-05-02
+
+User feedback: the asset-class donut on the Portfolio tab was degenerate. With only crypto connectors today (Bybit + MetaMask + Polymarket), most users see one ~100% slice for "crypto" with maybe a sliver of "prediction" — no signal. Replaced with a more useful breakdown.
+
+### Changed
+
+- **Portfolio tab — "Allocation by asset class" → "Allocation by symbol"**: removed the degenerate asset-class donut. Replaced with a per-symbol allocation donut showing the top 7 positions + a single "Other (N)" slice rolling up the long tail. Real percentage breakdown across what the user actually holds; no slice will be 100% unless the portfolio is genuinely a single position.
+- **`bucketTopN()` helper** added in `iframe.ts` — sorts rows desc, keeps the top N, aggregates the rest into one "Other" slice. Skips the bucketing if `<=N` rows or the tail sums to zero.
+- The previous "Top 10 by symbol" bar chart was removed since the donut now shows the same data more clearly as a percentage breakdown. The "Top positions by value" table is retained — it shows ranked values + per-account split, which the donut doesn't.
+- README dashboard section updated to describe the new layout.
+- `SERVER_VERSION` 0.10.1 → 0.10.2; package.json bump.
+
+### Forward note
+
+When a stock or brokerage connector lands (IBKR / Schwab / etc.), the asset-class donut becomes meaningful again — easy to re-add then.
+
+### Tests
+
+- 233 tests pass unchanged. Bundle 403.2KB → 402.6KB (down a hair from removing one section's HTML template).
+
 ## v0.10.1 — 2026-05-02
 
 Visual polish on the v0.10.0 dashboard. No behavior change, no new tools, no breaking schema.

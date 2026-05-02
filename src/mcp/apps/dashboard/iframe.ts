@@ -171,6 +171,20 @@ function pieChart(rows: Array<{ label: string; value: number }>, ccy: Currency):
   `;
 }
 
+// Take the top N rows by value and roll up the rest into a single "Other"
+// slice. Avoids the 30-slice-confetti problem on portfolios with a long tail
+// of dust positions, while preserving the total. If there are <= n rows OR
+// the tail sum is zero, returns the input unchanged.
+function bucketTopN(rows: Array<{ label: string; value: number }>, n: number): Array<{ label: string; value: number }> {
+  const sorted = [...rows].sort((a, b) => b.value - a.value);
+  if (sorted.length <= n) return sorted;
+  const top = sorted.slice(0, n);
+  const tail = sorted.slice(n);
+  const tailSum = tail.reduce((s, r) => s + r.value, 0);
+  if (tailSum <= 0) return top;
+  return [...top, { label: `Other (${tail.length})`, value: tailSum }];
+}
+
 // Tiny SVG horizontal bar chart. width=100% of parent, no deps, no Chart.js.
 function barChart(rows: Array<{ label: string; value: number }>, ccy: Currency): string {
   if (rows.length === 0) return '<div class="empty">No data</div>';
@@ -239,10 +253,10 @@ interface PnlResult {
 async function renderPortfolio(): Promise<void> {
   const target = $("tab-content");
   showLoading(target);
-  const [h, byClass, bySymbol, pnl] = await Promise.all([
+  const [h, bySymbol, pnl] = await Promise.all([
     callTool<HoldingsResult>("get_holdings", { currency }),
-    callTool<AllocationsResult>("get_allocations", { by: "asset_class" }),
-    callTool<AllocationsResult>("get_allocations", { by: "symbol", top: 10 }),
+    // Pull more than we'll display so we can compute the "Other" tail bucket.
+    callTool<AllocationsResult>("get_allocations", { by: "symbol" }),
     callTool<PnlResult>("get_pnl", {}),
   ]);
 
@@ -270,11 +284,6 @@ async function renderPortfolio(): Promise<void> {
     </section>
 
     <section>
-      <h3>Allocation by asset class</h3>
-      ${pieChart((byClass?.rows ?? []).map((r) => ({ label: r.label, value: r.currentValue })), currency)}
-    </section>
-
-    <section>
       <h3>Top positions by value</h3>
       <table>
         <thead><tr><th>Symbol</th><th>Account</th><th>Qty</th><th>Value</th><th>% of portfolio</th></tr></thead>
@@ -294,8 +303,8 @@ async function renderPortfolio(): Promise<void> {
 
     ${bySymbol && bySymbol.rows.length > 0 ? `
     <section>
-      <h3>Top 10 by symbol (across accounts)</h3>
-      ${barChart(bySymbol.rows.slice(0, 10).map((r) => ({ label: r.label, value: r.currentValue })), currency)}
+      <h3>Allocation by symbol</h3>
+      ${pieChart(bucketTopN(bySymbol.rows.map((r) => ({ label: r.label, value: r.currentValue })), 7), currency)}
     </section>` : ""}
 
     ${h.warnings.length > 0 ? `

@@ -1,6 +1,6 @@
 {
   "name": "headless-tracker",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "MCP server for portfolio tracking across crypto exchanges, on-chain wallets, brokerages, and prediction markets. Query your portfolio from any MCP-compatible AI host (Claude Desktop, Claude Code, Cursor, ChatGPT).",
   "type": "module",
   "module": "src/mcp/server.ts",
