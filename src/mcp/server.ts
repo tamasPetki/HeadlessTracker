@@ -61,14 +61,15 @@ import {
   RISK_CHECK_PROMPT_CONFIG,
   buildRiskCheckPrompt,
 } from "./prompts/risk_check.ts";
+import { registerDashboardApp } from "./apps/dashboard/register.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.9.2";
+const SERVER_VERSION = "0.10.0";
 
 export function createMcpServer(): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: {}, prompts: {} } }
+    { capabilities: { tools: {}, prompts: {}, resources: {} } }
   );
 
   // Note: using the `tool()` API (marked @deprecated in SDK 1.29 in favor of
@@ -156,6 +157,12 @@ export function createMcpServer(): McpServer {
   server.registerPrompt(DASHBOARD_PROMPT_NAME, DASHBOARD_PROMPT_CONFIG, () => buildDashboardPrompt());
   server.registerPrompt(WEEKLY_REVIEW_PROMPT_NAME, WEEKLY_REVIEW_PROMPT_CONFIG, () => buildWeeklyReviewPrompt());
   server.registerPrompt(RISK_CHECK_PROMPT_NAME, RISK_CHECK_PROMPT_CONFIG, () => buildRiskCheckPrompt());
+
+  // Interactive dashboard MCP App — registers `render_dashboard` tool +
+  // bundled UI resource. Hosts that support the io.modelcontextprotocol/ui
+  // extension (Claude Desktop, Goose, ChatGPT, VS Code, etc.) render the
+  // tool's output as a sandboxed iframe with live tabs and refresh.
+  registerDashboardApp(server);
 
   return server;
 }

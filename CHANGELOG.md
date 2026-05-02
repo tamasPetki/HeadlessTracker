@@ -2,6 +2,50 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.10.0 — 2026-05-02
+
+The big one: **interactive dashboard MCP App**. The user can now ask Claude "show my dashboard" and get a live, interactive 3-tab UI panel rendered directly in the chat (Portfolio / Weekly / Risk, currency switcher USD/EUR/GBP/HUF, refresh button). This uses the [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) extension (`io.modelcontextprotocol/ui`) which Claude Desktop, ChatGPT, Goose, and VS Code all support.
+
+Two-commit increment: SDK upgrade (`v0.10 #1`) + dashboard implementation (`v0.10 #2`).
+
+### Added
+
+- **`render_dashboard` MCP App tool** — registered with `_meta.ui.resourceUri` pointing at the bundled HTML resource. Optional `currency` and `tab` args set the initial view.
+- **Bundled dashboard UI** — `src/mcp/apps/dashboard/iframe.ts` (browser-side TS using `@modelcontextprotocol/ext-apps`), `shell.html` (template with inline CSS, no external deps), and `register.ts` (server-side helper). Bundled via `bun run build:apps` into `dist/mcp-apps/dashboard.html` (~400KB single file, committed so `bunx` users don't need a build step).
+- **Three live tabs in the iframe**:
+  - **Portfolio** — total value, positions count, accounts, asset-class allocation chart, top 10 positions table, top 10 by symbol chart, warnings + failures sections. Calls `get_holdings` / `get_allocations` / `get_pnl` in parallel with the chosen currency.
+  - **Weekly** — 7-day window delta KPIs (historical value, current value, delta, percent), recent trades table (last 50 from `since=7d`), skipped-symbols disclosure. Calls `get_pnl` with `timeframe=7d` and `get_transactions` with `since=7d`.
+  - **Risk** — concentration audit (single-position, venue, stablecoin reserve, prediction-market overweight) with PASS / WARN / ALERT scoring, by-venue bar chart. Calls `get_holdings` + 3× `get_allocations`.
+- **`bun run build:apps`** script — `scripts/build-mcp-apps.ts`. Bundles iframe.ts via `Bun.build` (browser target, ESM, minified), inlines into shell.html, writes `dist/mcp-apps/dashboard.html`. Wired into `prepublishOnly` so npm publishes always include a fresh build.
+- **`resources: {}` capability** advertised by the McpServer (added alongside the existing `tools: {}` and `prompts: {}`).
+- **`.gitignore` exception** for `dist/mcp-apps/` so the bundled artifact ships with the package; rest of `dist/` stays ignored.
+- **`package.json` files field** now includes `dist/mcp-apps/` and `CHANGELOG.md`.
+
+### Changed
+
+- **`@modelcontextprotocol/sdk` upgraded `^1.0.4` → `^1.29.0`** in `v0.10 #1`. The bumped SDK ships the resource registration helpers `ext-apps` relies on. Existing 224 tests passed unchanged on the new SDK — the deprecated `server.tool()` API still works at runtime, and the TS2589 generic-depth issue noted in `src/mcp/server.ts:60-63` doesn't trigger because we kept the simpler `tool()` form (not `registerTool()`).
+- **Added `@modelcontextprotocol/ext-apps@^1.7.1`** as a runtime dep. Server-side helpers (`registerAppTool` / `registerAppResource` / `RESOURCE_MIME_TYPE`) and the browser-side `App` class.
+- **`SERVER_VERSION` constant** in `src/mcp/server.ts`: 0.9.2 → 0.10.0.
+- **README** — new "Use the interactive dashboard (MCP App)" section, status line bumped to 233 tests + 7 MCP tools + interactive dashboard. Existing prompt cookbook section retained as fallback for hosts that don't render MCP Apps.
+- **E2E test** `test/e2e/mcp-stdio.test.ts:163` — assertion updated from "exactly the 6 V0 tools" to "the V0 data tools + render_dashboard MCP App" (7 tools total).
+
+### Tests
+
+- 9 new tests in `test/mcp/apps/dashboard.test.ts`: tool name + URI scheme stability, description quality, server-construction smoke, bundled-artifact existence, doctype + script tag presence, postMessage protocol marker (`ui/initialize`) survives minification, bundle size sanity guard (< 1MB).
+- 224 → 233 tests, typecheck clean.
+
+### Build-script gotcha worth remembering
+
+`String.prototype.replace(pattern, replacement)` interprets `$&`, `$1`, etc. in the replacement string specially. The bundled JS happened to contain `\\$&` (a regex backreference used inside `String.prototype.replace` for character-class escaping). When my first build script passed `bundledJs` directly, those `$&` patterns expanded to inject `__BUNDLED_JS__` mid-bundle, ballooning the output to 553KB and breaking the placeholder check. Fix: pass replacement as a function (`shell.replace("__BUNDLED_JS__", () => escapedJs)`) which sidesteps pattern interpretation entirely. Output now 401KB, clean. Logged here so I don't re-introduce it.
+
+### Deferred (not in this release)
+
+- Per-account `windowDelta` (the dashboard's Weekly tab pulls total-only).
+- Wiring `prices.ts` into `get_holdings` for snapshot consistency.
+- Larger Bulltrapp connector ports (Solana, Bitcoin xpub, Coinbase, Binance, Kraken, KuCoin).
+- Bundle size optimization — 401KB is dominated by `zod` + transitive MCP SDK deps. Could shave with a stripped-down browser-only client, but not worth it until the 401KB causes a real problem.
+- Dark/light theme: the iframe uses `prefers-color-scheme` from the host's CSS env. The MCP Apps spec also exposes host theme via `onhostcontextchanged` — could be wired up to react more reliably to runtime theme switches.
+
 ## v0.9.2 — 2026-05-01
 
 Adds **MCP prompts** — preset prompt templates the server exposes alongside its tools. They show up as slash-command-style entries in Claude Desktop's prompt picker (and in Claude Code) so the user doesn't have to remember which tools to call together for the common workflows. Pure additive: zero changes to existing tools or CLI behavior.

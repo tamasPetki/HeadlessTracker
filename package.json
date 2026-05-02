@@ -1,6 +1,6 @@
 {
   "name": "headless-tracker",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "MCP server for portfolio tracking across crypto exchanges, on-chain wallets, brokerages, and prediction markets. Query your portfolio from any MCP-compatible AI host (Claude Desktop, Claude Code, Cursor, ChatGPT).",
   "type": "module",
   "module": "src/mcp/server.ts",
@@ -13,13 +13,16 @@
     "test": "bun test --timeout=15000",
     "test:watch": "bun test --watch --timeout=15000",
     "typecheck": "bun --bun tsc --noEmit",
-    "prepublishOnly": "bun test --timeout=15000 && bun --bun tsc --noEmit"
+    "build:apps": "bun run scripts/build-mcp-apps.ts",
+    "prepublishOnly": "bun test --timeout=15000 && bun --bun tsc --noEmit && bun run build:apps"
   },
   "files": [
     "bin/",
     "src/",
+    "dist/mcp-apps/",
     "tsconfig.json",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "publishConfig": {

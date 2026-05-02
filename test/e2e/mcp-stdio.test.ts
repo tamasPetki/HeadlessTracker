@@ -160,7 +160,7 @@ describe("E2E: MCP stdio server", () => {
     expect(client).toBeDefined();
   });
 
-  test("tools/list returns exactly the 6 V0 tools", async () => {
+  test("tools/list returns the V0 data tools + render_dashboard MCP App", async () => {
     const resp = await client.send("tools/list");
     expect(resp.error).toBeUndefined();
     const tools = (resp.result as ToolListResult).tools;
@@ -172,6 +172,7 @@ describe("E2E: MCP stdio server", () => {
       "get_polymarket_positions",
       "get_transactions",
       "refresh_data",
+      "render_dashboard",
     ]);
   });
 
