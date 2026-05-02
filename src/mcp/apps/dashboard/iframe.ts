@@ -87,6 +87,90 @@ function escapeHtml(s: string): string {
   })[c]!);
 }
 
+// Color palette for pie/donut slices. Picked to be readable in both light
+// and dark themes; cycles if more slices than colors.
+const SLICE_COLORS = [
+  "#2f81f7", // blue
+  "#3fb950", // green
+  "#d29922", // amber
+  "#bc8cff", // purple
+  "#f85149", // red
+  "#1f6feb", // dark blue
+  "#56d4dd", // teal
+  "#ff7b72", // coral
+];
+
+// SVG donut chart. Renders slices + a side legend. For breakdowns where
+// percentages of a whole are the natural framing (asset class, venue mix).
+// Returns a flex row with chart on the left, legend on the right.
+function pieChart(rows: Array<{ label: string; value: number }>, ccy: Currency): string {
+  const total = rows.reduce((s, r) => s + r.value, 0);
+  if (total <= 0) return '<div class="empty">No data</div>';
+  // Sort descending so the biggest slice starts at 12 o'clock and reads
+  // clockwise — matches user expectation for "biggest first" charts.
+  const sorted = [...rows].sort((a, b) => b.value - a.value);
+
+  const cx = 110;
+  const cy = 110;
+  const r = 90;
+  const inner = 55;
+  let angle = -Math.PI / 2; // Start at top
+
+  const sliceSvg: string[] = [];
+  const legendItems: string[] = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const row = sorted[i]!;
+    const pct = row.value / total;
+    const sweep = pct * 2 * Math.PI;
+    const color = SLICE_COLORS[i % SLICE_COLORS.length]!;
+
+    if (sorted.length === 1) {
+      // Edge case: a single 100% slice — full ring, not a degenerate path.
+      sliceSvg.push(
+        `<circle cx="${cx}" cy="${cy}" r="${(r + inner) / 2}" fill="none" stroke="${color}" stroke-width="${r - inner}"/>`
+      );
+    } else {
+      const x1 = cx + r * Math.cos(angle);
+      const y1 = cy + r * Math.sin(angle);
+      const x2 = cx + r * Math.cos(angle + sweep);
+      const y2 = cy + r * Math.sin(angle + sweep);
+      const x3 = cx + inner * Math.cos(angle + sweep);
+      const y3 = cy + inner * Math.sin(angle + sweep);
+      const x4 = cx + inner * Math.cos(angle);
+      const y4 = cy + inner * Math.sin(angle);
+      const large = sweep > Math.PI ? 1 : 0;
+      const d =
+        `M ${x1.toFixed(2)} ${y1.toFixed(2)} ` +
+        `A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} ` +
+        `L ${x3.toFixed(2)} ${y3.toFixed(2)} ` +
+        `A ${inner} ${inner} 0 ${large} 0 ${x4.toFixed(2)} ${y4.toFixed(2)} Z`;
+      sliceSvg.push(`<path d="${d}" fill="${color}"></path>`);
+    }
+    angle += sweep;
+
+    legendItems.push(`
+      <div class="legend-item">
+        <span class="legend-swatch" style="background:${color}"></span>
+        <span class="legend-label">${escapeHtml(row.label)}</span>
+        <span class="legend-value">${escapeHtml(fmtMoney(row.value, ccy))}</span>
+        <span class="legend-pct">${(pct * 100).toFixed(1)}%</span>
+      </div>
+    `);
+  }
+
+  return `
+    <div class="pie-row">
+      <svg viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg" class="pie-chart">
+        ${sliceSvg.join("")}
+        <text x="${cx}" y="${cy - 4}" text-anchor="middle" class="pie-total-label">Total</text>
+        <text x="${cx}" y="${cy + 14}" text-anchor="middle" class="pie-total-value">${escapeHtml(fmtMoney(total, ccy))}</text>
+      </svg>
+      <div class="legend">${legendItems.join("")}</div>
+    </div>
+  `;
+}
+
 // Tiny SVG horizontal bar chart. width=100% of parent, no deps, no Chart.js.
 function barChart(rows: Array<{ label: string; value: number }>, ccy: Currency): string {
   if (rows.length === 0) return '<div class="empty">No data</div>';
@@ -187,7 +271,7 @@ async function renderPortfolio(): Promise<void> {
 
     <section>
       <h3>Allocation by asset class</h3>
-      ${barChart((byClass?.rows ?? []).map((r) => ({ label: r.label, value: r.currentValue })), currency)}
+      ${pieChart((byClass?.rows ?? []).map((r) => ({ label: r.label, value: r.currentValue })), currency)}
     </section>
 
     <section>
@@ -397,7 +481,7 @@ async function renderRisk(): Promise<void> {
 
     <section>
       <h3>By venue</h3>
-      ${barChart(byConn.rows.map((r) => ({ label: r.label, value: r.currentValue })), "USD")}
+      ${pieChart(byConn.rows.map((r) => ({ label: r.label, value: r.currentValue })), "USD")}
     </section>
   `;
 }

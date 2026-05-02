@@ -136,6 +136,37 @@
   .bar { fill: var(--bar); }
   .bar-label, .bar-value { fill: var(--fg); font-size: 12px; }
   .bar-value { font-variant-numeric: tabular-nums; }
+  .pie-row {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .pie-chart { width: 220px; height: 220px; flex-shrink: 0; }
+  .pie-total-label { fill: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .pie-total-value { fill: var(--fg); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .legend {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 220px;
+  }
+  .legend-item {
+    display: grid;
+    grid-template-columns: 14px 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+  }
+  .legend-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+  .legend-label { color: var(--fg); }
+  .legend-value { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .legend-pct { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
   details summary { cursor: pointer; color: var(--muted); margin-top: 8px; }
   details ul { font-size: 12px; color: var(--muted); }
 </style>

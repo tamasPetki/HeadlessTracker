@@ -64,7 +64,7 @@ import {
 import { registerDashboardApp } from "./apps/dashboard/register.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.10.0";
+const SERVER_VERSION = "0.10.1";
 
 export function createMcpServer(): McpServer {
   const server = new McpServer(

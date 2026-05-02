@@ -2,6 +2,27 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.10.1 — 2026-05-02
+
+Visual polish on the v0.10.0 dashboard. No behavior change, no new tools, no breaking schema.
+
+### Added
+
+- **Donut chart** for percentage breakdowns. New `pieChart()` helper in `src/mcp/apps/dashboard/iframe.ts` renders an SVG donut + side legend (color swatch, label, value, percent). Pure SVG, no chart library — keeps the bundle within ~2KB of the v0.10.0 size.
+- 8-color slice palette tuned for both light and dark themes. Colors cycle if there are more slices than colors.
+
+### Changed
+
+- **Portfolio tab — "Allocation by asset class"**: replaced the horizontal bar chart with a donut + legend. Asset class is the canonical "share of whole" view; pie/donut is the natural framing for that.
+- **Risk tab — "By venue"**: same swap. Venue concentration is also a percentage breakdown — donut reads more clearly than bars at the same data density.
+- Bar charts retained where they make sense: top-positions-by-symbol (Portfolio tab) is a ranked-by-value view, not a percentage breakdown — bars stay better there.
+- README: hoisted the dashboard section to the top of the doc (right after "What it does"), so first-time readers see the live-UI feature immediately. Step 5 in the setup flow shrunk to a "now try it" pointer that links back to the top section.
+- `SERVER_VERSION` 0.10.0 → 0.10.1; package.json bump.
+
+### Tests
+
+- 233 tests pass unchanged (only HTML-string content changed, no test assertions touched). Bundle 397.5KB → 403.2KB (within tolerance, sanity-guard threshold of 1MB still holds).
+
 ## v0.10.0 — 2026-05-02
 
 The big one: **interactive dashboard MCP App**. The user can now ask Claude "show my dashboard" and get a live, interactive 3-tab UI panel rendered directly in the chat (Portfolio / Weekly / Risk, currency switcher USD/EUR/GBP/HUF, refresh button). This uses the [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) extension (`io.modelcontextprotocol/ui`) which Claude Desktop, ChatGPT, Goose, and VS Code all support.

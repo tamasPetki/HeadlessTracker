@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.10.0. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 7 MCP tools (6 data + `render_dashboard` MCP App), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App (Portfolio / Weekly / Risk + currency switcher + refresh), CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 233-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** v0.10.1. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 7 MCP tools (6 data + `render_dashboard` MCP App), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 233-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -16,6 +16,26 @@ Connects to your accounts (read-only), normalizes everything into a single schem
 - "Refresh Bybit and tell me my BTC P&L."
 
 The AI host generates the chart, the table, the breakdown. You don't build a UI.
+
+## Interactive dashboard (live UI panel)
+
+For hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) — Claude Desktop, ChatGPT, Goose, VS Code — say:
+
+> Show my dashboard
+
+The host renders a sandboxed iframe in the chat panel with three live tabs:
+
+- **Portfolio** — total value KPIs, asset-class donut chart, top positions table, top-by-symbol bar chart, warnings + failures
+- **Weekly** — 7-day window delta KPIs, recent trades table, skipped-symbols disclosure (with reasons)
+- **Risk** — concentration audit (single-position, venue, stablecoin reserve, prediction-market overweight) scored PASS / WARN / ALERT, by-venue donut
+
+Plus a currency switcher (USD / EUR / GBP / HUF) and a refresh button. The iframe makes its own follow-up tool calls as the user clicks tabs — no extra prompting needed once it's open. Optional args:
+
+> Open the dashboard in HUF, weekly tab
+
+Implementation: `src/mcp/apps/dashboard/` (browser-side TS bundled into a single `dist/mcp-apps/dashboard.html` via `bun run build:apps`, ships with the package). The bundled artifact is committed so users running `bunx headless-tracker` don't need a build step.
+
+If your host doesn't render MCP Apps yet, the `render_dashboard` tool still returns a textual confirmation. Use the [prompt cookbook](#prompt-cookbook) below as a fallback — same workflows, same data, just no live UI panel.
 
 ## Quick start
 
@@ -77,17 +97,11 @@ If Claude doesn't see the tools, check `~/Library/Logs/Claude/mcp-server-headles
 
 ### 5. Use the interactive dashboard (MCP App)
 
-Hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) — Claude Desktop, ChatGPT, Goose, VS Code, etc. — can render the dashboard as a **live interactive panel** in the chat. Ask Claude:
+Once setup works, ask:
 
 > Show my dashboard
 
-Or with arguments:
-
-> Open the dashboard in HUF, weekly tab
-
-Claude calls the `render_dashboard` tool, the host fetches the bundled `ui://headless-tracker/dashboard` resource, and an iframe renders inline with three tabs (Portfolio / Weekly / Risk), a currency switcher (USD / EUR / GBP / HUF), and a refresh button. The iframe makes its own follow-up tool calls for live data — no extra prompting needed once it's open.
-
-If the host doesn't support MCP Apps yet, the tool still returns a textual confirmation but the user gets no live UI. Use the preset prompts below as a fallback for those clients.
+The live UI panel pops up in the chat. See the [Interactive dashboard](#interactive-dashboard-live-ui-panel) section above for what's in each tab and how to pass args.
 
 ### 6. Use the preset prompts (one-click dashboards)
 
