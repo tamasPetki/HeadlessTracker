@@ -13,7 +13,10 @@ let svc: PriceService;
 
 beforeEach(() => {
   cache = new Cache({ dbPath: ":memory:" });
-  svc = new PriceService({ cache });
+  // Disable rate-limit retries by default in tests — the retry path is
+  // covered explicitly in its own describe block below. Saves ~5s per
+  // 429 test that exercises an unrelated path.
+  svc = new PriceService({ cache, rateLimitRetries: 0 });
 });
 
 afterEach(() => {
@@ -338,5 +341,96 @@ describe("PriceService.getHistoricalPrice", () => {
     // 2024-03-05 in UTC.
     await svc.getHistoricalPrice("bitcoin", new Date(Date.UTC(2024, 2, 5)));
     expect(observedUrl).toContain("date=05-03-2024");
+  });
+});
+
+describe("PriceService rate-limit retry (429 → backoff → success)", () => {
+  test("retries on 429 then succeeds within budget", async () => {
+    let calls = 0;
+    globalThis.fetch = (async (): Promise<Response> => {
+      calls++;
+      if (calls === 1) return new Response("429", { status: 429 });
+      return new Response(
+        JSON.stringify({ market_data: { current_price: { usd: 50000 } } }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    // 1ms backoff so the test stays sub-millisecond. retries=2 means total
+    // attempts up to 3 — we want the 2nd to succeed.
+    const fastSvc = new PriceService({
+      cache: new Cache({ dbPath: ":memory:" }),
+      rateLimitRetries: 2,
+      rateLimitBackoffMs: 1,
+    });
+    const r = await fastSvc.getHistoricalPrice("bitcoin", new Date(Date.UTC(2024, 0, 15)));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toBe(50000);
+    expect(calls).toBe(2);
+  });
+
+  test("gives up after retry budget exhausted, surfaces rate_limited", async () => {
+    let calls = 0;
+    globalThis.fetch = (async (): Promise<Response> => {
+      calls++;
+      return new Response("429", { status: 429 });
+    }) as unknown as typeof fetch;
+
+    const fastSvc = new PriceService({
+      cache: new Cache({ dbPath: ":memory:" }),
+      rateLimitRetries: 2,
+      rateLimitBackoffMs: 1,
+    });
+    const r = await fastSvc.getHistoricalPrice("bitcoin", new Date(Date.UTC(2024, 0, 15)));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe("rate_limited");
+    // 1 initial + 2 retries = 3 total attempts.
+    expect(calls).toBe(3);
+  });
+
+  test("non-rate-limit errors don't trigger retries", async () => {
+    let calls = 0;
+    globalThis.fetch = (async (): Promise<Response> => {
+      calls++;
+      return new Response("nope", { status: 502 });
+    }) as unknown as typeof fetch;
+
+    const fastSvc = new PriceService({
+      cache: new Cache({ dbPath: ":memory:" }),
+      rateLimitRetries: 5,        // budget exists but shouldn't be used
+      rateLimitBackoffMs: 1,
+    });
+    const r = await fastSvc.getHistoricalPrice("bitcoin", new Date(Date.UTC(2024, 0, 15)));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe("upstream_error");
+    expect(calls).toBe(1);
+  });
+
+  test("aborted signal during backoff bails immediately", async () => {
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response("429", { status: 429 });
+    }) as unknown as typeof fetch;
+
+    const fastSvc = new PriceService({
+      cache: new Cache({ dbPath: ":memory:" }),
+      rateLimitRetries: 5,
+      // Long backoff so we can prove the abort short-circuits it.
+      rateLimitBackoffMs: 10_000,
+    });
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), 20);
+
+    const start = Date.now();
+    const r = await fastSvc.getHistoricalPrice("bitcoin", new Date(Date.UTC(2024, 0, 15)), ctrl.signal);
+    const elapsed = Date.now() - start;
+    expect(r.ok).toBe(false);
+    // Total time well under one full backoff window, proves abort short-circuits.
+    expect(elapsed).toBeLessThan(2000);
+  });
+});
+
+describe("static map: SUPER (regression for v0.13.1 windowDelta skip)", () => {
+  test("SUPER resolves to a CoinGecko id without hitting top-250 fallback", () => {
+    expect(symbolToCoinGeckoId("SUPER")).toBe("superfarm");
   });
 });

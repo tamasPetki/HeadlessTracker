@@ -24,6 +24,14 @@ const FETCH_TIMEOUT_MS = 10_000;
 const SPOT_TTL_SEC = 60;
 const HISTORICAL_TTL_SEC = 7 * 24 * 60 * 60;
 
+// CoinGecko free tier hits 429 on /coins/{id}/history fast under parallel load.
+// One retry with a 2.5s sleep covers the typical rate-limit window — the limit
+// is per-minute but resets in seconds-scale rolling buckets in practice. Two
+// retries handle rare back-to-back hits without unbounded waiting. Tests can
+// override via PriceServiceOptions to keep them fast.
+const DEFAULT_RATE_LIMIT_RETRIES = 2;
+const DEFAULT_RATE_LIMIT_BACKOFF_MS = 2500;
+
 // Module-internal cache namespace — separate from any ConnectorId so price cache
 // entries don't show up under a connector's slot in `invalidate(connectorId)`.
 // Cache.get/set/invalidate were widened to ConnectorId | string for this.
@@ -86,6 +94,7 @@ const COINGECKO_IDS: Record<string, string> = {
   SPEC: "spectral",
   MON: "monad",
   VVV: "venice-token",
+  SUPER: "superfarm",                     // SuperVerse (rebranded from SuperFarm), id stayed
 };
 
 export interface PriceData {
@@ -115,15 +124,23 @@ interface CoinMarketRow {
 export interface PriceServiceOptions {
   cache?: Cache;
   apiKey?: string; // optional CoinGecko demo key; defaults to env COINGECKO_API_KEY
+  // Test seam: override the retry budget on 429s. Default 2 retries with
+  // 2500ms backoff each. Tests pass 0 to get instant rate_limited propagation.
+  rateLimitRetries?: number;
+  rateLimitBackoffMs?: number;
 }
 
 export class PriceService {
   private cache: Cache;
   private apiKey?: string;
+  private rateLimitRetries: number;
+  private rateLimitBackoffMs: number;
 
   constructor(opts: PriceServiceOptions = {}) {
     this.cache = opts.cache ?? defaultCache();
     this.apiKey = opts.apiKey ?? process.env.COINGECKO_API_KEY;
+    this.rateLimitRetries = opts.rateLimitRetries ?? DEFAULT_RATE_LIMIT_RETRIES;
+    this.rateLimitBackoffMs = opts.rateLimitBackoffMs ?? DEFAULT_RATE_LIMIT_BACKOFF_MS;
   }
 
   // Resolve a symbol to a CoinGecko coin id. Two-tier:
@@ -285,8 +302,27 @@ export class PriceService {
 
   // Internal: timeout-bounded fetch returning Result<T>. Maps HTTP status codes
   // to ConnectorErrorKind so the orchestrator's error surfacing is uniform with
-  // the other connectors.
+  // the other connectors. Retries on 429 with backoff (CoinGecko free tier
+  // hits this often when /coins/{id}/history is fanned out across many coins).
   private async fetch<T>(url: string, externalSignal?: AbortSignal): Promise<Result<T>> {
+    let lastErr: Result<T> | null = null;
+    for (let attempt = 0; attempt <= this.rateLimitRetries; attempt++) {
+      const r = await this.fetchOnce<T>(url, externalSignal);
+      if (r.ok) return r;
+      lastErr = r;
+      // Only retry on rate_limited. Auth/network errors won't fix themselves.
+      if (r.error.kind !== "rate_limited") return r;
+      // Don't sleep after the last attempt — caller wants the error to bubble.
+      if (attempt < this.rateLimitRetries) {
+        // If the caller aborts during backoff, bail immediately.
+        if (externalSignal?.aborted) return r;
+        await sleepWithAbort(this.rateLimitBackoffMs, externalSignal);
+      }
+    }
+    return lastErr!;
+  }
+
+  private async fetchOnce<T>(url: string, externalSignal?: AbortSignal): Promise<Result<T>> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     const onCallerAbort = () => controller.abort();
@@ -317,6 +353,26 @@ export class PriceService {
       externalSignal?.removeEventListener("abort", onCallerAbort);
     }
   }
+}
+
+// Promise-based sleep that resolves early if the caller aborts. Used between
+// retry attempts so a hung backoff doesn't outlive a cancelled tool call.
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const t = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(t);
+      resolve();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 // CoinGecko historical date format: DD-MM-YYYY in UTC.

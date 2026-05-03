@@ -527,7 +527,10 @@ describe("executeGetPnl — windowDelta (timeframe-driven)", () => {
 
   beforeEach(() => {
     priceCache = new Cache({ dbPath: ":memory:" });
-    priceSvc = new PriceService({ cache: priceCache });
+    // rateLimitRetries=0: the existing test cases mock fetch deterministically
+    // and don't want to wait through retry backoffs. v0.13.1 added retry-on-429
+    // with default 2× 2.5s backoff for prod use.
+    priceSvc = new PriceService({ cache: priceCache, rateLimitRetries: 0 });
   });
 
   afterEach(() => {
@@ -773,5 +776,81 @@ describe("executeGetPnl — windowDelta (timeframe-driven)", () => {
     expect(w.skippedReasons[0]).toContain("historical price unavailable");
     // Result is still well-formed, no thrown error.
     expect(r.total.currentValue).toBe(50000);
+  });
+
+  test("rate-limited historical price → skip reason includes the actionable hint", async () => {
+    // Regression for the user-reported bug where 13 mainstream coins all
+    // failed historical price with the generic "unavailable" message — the
+    // root cause was 429s under parallel fan-out. The fix adds retry-on-429
+    // (covered in test/prices.test.ts) and surfaces the failure mode in the
+    // skip reason so users can act on it.
+    setupAccount("bybit:UNIFIED", "bybit");
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response("Too many requests", { status: 429 });
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 1, value: 50000 })]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ timeframe: "7d" }, orch, priceSvc);
+    const w = r.total.windowDelta!;
+    expect(w.skippedSymbols).toBe(1);
+    expect(w.skippedReasons[0]).toContain("rate limit");
+    expect(w.skippedReasons[0]).toContain("COINGECKO_API_KEY");
+  });
+
+  test("computeWindowDelta limits concurrency on historical price fan-out", async () => {
+    // Regression for the parallel-429 bug. Verifies that with 6 coins to
+    // price, the historical fetcher does NOT fire all 6 at once. Concurrency
+    // cap is 3 → max in-flight at any moment is 3.
+    setupAccount("bybit:UNIFIED", "bybit");
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    globalThis.fetch = (async (url: string | URL): Promise<Response> => {
+      const u = String(url);
+      if (u.includes("/coins/") && u.includes("/history")) {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        // Yield to the event loop so concurrent calls can race the counter.
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight--;
+        return new Response(
+          JSON.stringify({ market_data: { current_price: { usd: 100 } } }),
+          { status: 200 }
+        );
+      }
+      return new Response("not mocked", { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([
+            makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 1, value: 50000 }),
+            makeHolding({ accountId: "bybit:UNIFIED", symbol: "ETH", quantity: 1, value: 3000 }),
+            makeHolding({ accountId: "bybit:UNIFIED", symbol: "SOL", quantity: 1, value: 100 }),
+            makeHolding({ accountId: "bybit:UNIFIED", symbol: "XRP", quantity: 1, value: 1 }),
+            makeHolding({ accountId: "bybit:UNIFIED", symbol: "BNB", quantity: 1, value: 600 }),
+            makeHolding({ accountId: "bybit:UNIFIED", symbol: "NEAR", quantity: 1, value: 5 }),
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ timeframe: "7d" }, orch, priceSvc);
+    expect(r.total.windowDelta!.pricedSymbols).toBe(6);
+    // Concurrency limit is 3 in computeWindowDelta. Allow ≤3 to avoid being
+    // brittle to scheduler micro-timing.
+    expect(maxInFlight).toBeLessThanOrEqual(3);
   });
 });

@@ -468,18 +468,38 @@ async function computeWindowDelta(
     priceable.push({ coinId, quantity: h.quantity, currentValue: h.value });
   }
 
-  // De-dupe coin ids and fetch historical prices in parallel. The PriceService
-  // caches per (coin, date), so multiple holdings of the same symbol share one fetch.
+  // De-dupe coin ids. The PriceService caches per (coin, date), so multiple
+  // holdings of the same symbol share one fetch.
+  //
+  // CONCURRENCY: CoinGecko's free /coins/{id}/history endpoint is the
+  // strictest rate-limited endpoint they expose (~10-30 req/min). Firing all
+  // coins in parallel reliably triggers 429s across the board. We chunk to
+  // CONCURRENCY=3 with retry-on-429 baked into the PriceService fetch helper
+  // — that combination keeps total wall time low for cache-cold runs while
+  // not torching the rate limit for cache-warm ones.
   const uniqueCoins = Array.from(new Set(priceable.map((p) => p.coinId)));
   const priceMap = new Map<string, number>();
-  await Promise.all(
-    uniqueCoins.map(async (coinId) => {
-      const r = await priceService.getHistoricalPrice(coinId, date);
-      if (r.ok && r.value !== null) {
+  // Per-coin error reasons collected here so we can attribute "rate_limited"
+  // vs "no data" to each skipped symbol later.
+  const fetchErrors = new Map<string, string>();
+  const CONCURRENCY = 3;
+  for (let i = 0; i < uniqueCoins.length; i += CONCURRENCY) {
+    const chunk = uniqueCoins.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      chunk.map(async (coinId) => {
+        const r = await priceService.getHistoricalPrice(coinId, date);
+        if (!r.ok) {
+          fetchErrors.set(coinId, r.error.kind);
+          return;
+        }
+        if (r.value === null) {
+          fetchErrors.set(coinId, "missing_data");
+          return;
+        }
         priceMap.set(coinId, r.value);
-      }
-    })
-  );
+      })
+    );
+  }
 
   let historicalValue = 0;
   let currentValueAtSnapshot = 0;
@@ -488,7 +508,22 @@ async function computeWindowDelta(
   for (const p of priceable) {
     const histPrice = priceMap.get(p.coinId);
     if (histPrice === undefined) {
-      skippedReasons.push(`${p.coinId}: historical price unavailable for ${timeframe} ago`);
+      const reason = fetchErrors.get(p.coinId);
+      // Stable prefix "historical price unavailable" so callers / tests can
+      // pattern-match the skip class. The detail tail tells the user WHICH
+      // failure mode hit and how (or whether) to recover:
+      //   - rate_limited → fixable, just retry or set COINGECKO_API_KEY env
+      //   - missing_data → coin was delisted / didn't exist on that date
+      //   - other kinds → upstream/network/etc., transient
+      const detail =
+        reason === "rate_limited"
+          ? " (CoinGecko rate limit — try again in ~1 minute, or set COINGECKO_API_KEY env to get a free demo key)"
+          : reason === "missing_data"
+          ? " (no CoinGecko snapshot for this date — coin may be too new or was delisted)"
+          : reason
+          ? ` (${reason})`
+          : "";
+      skippedReasons.push(`${p.coinId}: historical price unavailable for ${timeframe} ago${detail}`);
       continue;
     }
     historicalValue += p.quantity * histPrice;

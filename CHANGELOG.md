@@ -2,6 +2,33 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.13.1 — 2026-05-03
+
+User reported: 13 mainstream coins (solana, ripple, binancecoin, near, sui, hyperliquid, jupiter, etc.) all skipped with `historical price unavailable for 7d ago` in the windowDelta block. Root cause was CoinGecko rate-limiting on the `/coins/{id}/history` endpoint under parallel fan-out.
+
+### Fixed
+
+- **Parallel fan-out → 429 silent drop**: `computeWindowDelta` was firing `Promise.all` on N coins (the user had 13). CoinGecko's free `/coins/{id}/history` is the strictest rate-limited endpoint they expose (~10-30 req/min), and 13 simultaneous calls reliably trigger 429s. The error result was silently discarded by `if (r.ok && r.value !== null)`, leaving the user with a generic "unavailable" message and no way to know it was a rate limit.
+- **Concurrency cap** in `computeWindowDelta`: historical prices now fetch in chunks of 3 (was: unlimited via `Promise.all`). Combined with the new retry path below, the typical wall time goes from ~1s (with most calls failing) to ~3-5s (with all calls succeeding) for cache-cold runs.
+- **Retry-on-429 with backoff** in `PriceService.fetch`: when CoinGecko returns 429, the helper now retries up to 2 times with 2.5s sleeps between attempts (default; tunable via `PriceServiceOptions.rateLimitRetries` + `rateLimitBackoffMs`). Honors AbortSignal during backoff so cancelled tool calls don't hang. Other error kinds (auth, network, 5xx) bypass the retry — they won't fix themselves.
+- **Better skip reason**: instead of the bare "historical price unavailable for 7d ago", the message now appends the cause:
+  - `... (CoinGecko rate limit — try again in ~1 minute, or set COINGECKO_API_KEY env to get a free demo key)` for 429s
+  - `... (no CoinGecko snapshot for this date — coin may be too new or was delisted)` for missing data
+  - `... (<error_kind>)` for other failure modes
+- **`SUPER` added to `COINGECKO_IDS`**: maps to `superfarm` (the dominant SUPER ticker — SuperVerse rebranded from SuperFarm but kept the CoinGecko id). User had this token in a wallet and it was outside the cached top-250.
+
+### How to recover from rate-limiting (user-facing)
+
+If you see `windowDelta` skips with `(CoinGecko rate limit ...)`:
+1. Wait 1 minute and re-run the query (the rolling rate window clears).
+2. Set `COINGECKO_API_KEY=<demo-key>` in your environment — free CoinGecko demo keys (https://www.coingecko.com/en/api/pricing) bump you from the public 5-15 req/sec global to 30 req/min on the demo tier with no historical-endpoint penalty.
+3. Long-term: the cache TTL on historical entries is 7 days, so once a date succeeds it stays cached — repeated runs of `--timeframe=7d` won't re-hit the API.
+
+### Tests
+
+- 7 new tests: 4 for the retry-on-429 path (happy retry, exhausted budget, non-429 errors don't retry, abort short-circuits backoff), 1 for the SUPER static-map regression, 2 for the get_pnl skip-reason text + concurrency-cap (verifies max 3 in-flight historical calls when 6 coins need pricing).
+- 314 tests pass (was 307). Existing 429 tests now use `rateLimitRetries: 0` to keep them sub-millisecond.
+
 ## v0.13.0 — 2026-05-03
 
 **New connector: Binance.** Spot account holdings + optional Futures wallet/positions, read-only. HMAC-SHA256 signed REST API calls via Node's built-in `crypto` (no SDK dependency, ~390 lines of code). Mirrors Bybit's exchange-style credential pattern (apiKey + apiSecret) with one twist: a single Binance API key covers Spot/Margin/Futures, so we toggle Futures via an `includeFutures` flag rather than separate accountTypes.
