@@ -17,6 +17,7 @@ import {
   listCustomTokens,
   removeCustomToken,
 } from "../src/tokens.ts";
+import { BinanceConnector } from "../src/connectors/binance.ts";
 import { BybitConnector } from "../src/connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask.ts";
 import { PolymarketConnector } from "../src/connectors/polymarket.ts";
@@ -43,10 +44,11 @@ Usage:
   headless-tracker token <add|list|rm>    Manage custom ERC-20 token list (per MetaMask account/chain)
   headless-tracker help                   Show this help
 
-Connectors: bybit, metamask, polymarket, solana
+Connectors: bybit, binance, metamask, polymarket, solana
 
 Setup examples:
   headless-tracker setup bybit
+  headless-tracker setup binance
   headless-tracker setup metamask
   headless-tracker setup polymarket
   headless-tracker setup solana
@@ -377,6 +379,61 @@ async function setupPolymarket(): Promise<void> {
   console.log("  Test it: ask Claude Desktop \"show my Polymarket positions\"\n");
 }
 
+async function setupBinance(): Promise<void> {
+  console.log("\nBinance setup");
+  console.log("─────────────");
+  console.log("Create a read-only API key at: https://www.binance.com/en/my/settings/api-management");
+  console.log("Required permissions:");
+  console.log("  ✓ Enable Reading");
+  console.log("  ✗ Enable Spot & Margin Trading (LEAVE OFF)");
+  console.log("  ✗ Enable Withdrawals (LEAVE OFF — never enable for tracking)");
+  console.log("Optional: 'Enable Futures' if you want futures wallet + open positions tracked.\n");
+
+  const apiKey = await readLine("API Key: ");
+  const apiSecret = await readLine("API Secret: ");
+  if (!apiKey || !apiSecret) {
+    console.error("API key and secret are both required.");
+    process.exit(1);
+  }
+
+  const includeFuturesRaw = await readLine("Include Futures wallet + positions? (y/N): ");
+  const includeFutures = includeFuturesRaw.trim().toLowerCase() === "y";
+
+  const fullCreds = { apiKey, apiSecret, includeFutures };
+  const connector = new BinanceConnector();
+  console.log("\nValidating credentials (probing /api/v3/account)...");
+  const validation = await connector.validateCredentials(fullCreds);
+  if (!validation.ok) {
+    console.error(`Validation failed: ${validation.error.message}`);
+    process.exit(1);
+  }
+
+  const fingerprint = apiKey.slice(0, 6);
+  const accountIdentifier = `key-${fingerprint}`;
+  const vault = defaultVault();
+  const setResult = await vault.set("binance", accountIdentifier, fullCreds);
+  if (!setResult.ok) {
+    console.error(`Vault write failed: ${setResult.error.message}`);
+    process.exit(1);
+  }
+
+  const accounts = defaultAccountStore();
+  const label = includeFutures
+    ? `Binance Spot+Futures (${fingerprint}…)`
+    : `Binance Spot (${fingerprint}…)`;
+  const account: Account = {
+    id: `binance:${accountIdentifier}`,
+    connectorId: "binance",
+    label,
+    createdAt: Date.now(),
+    metadata: { keyFingerprint: fingerprint, includeFutures },
+  };
+  accounts.upsert(account);
+
+  console.log(`\n✓ Binance configured. Account ID: binance:${accountIdentifier}`);
+  console.log("  Test it: ask Claude Desktop \"show my Binance holdings\"\n");
+}
+
 async function setupSolana(): Promise<void> {
   console.log("\nSolana wallet setup");
   console.log("───────────────────");
@@ -438,7 +495,7 @@ async function setupSolana(): Promise<void> {
 
 async function setup(connectorId: string | undefined): Promise<void> {
   if (!connectorId) {
-    console.log("Available connectors: bybit, metamask, polymarket, solana");
+    console.log("Available connectors: bybit, binance, metamask, polymarket, solana");
     console.log("Usage: headless-tracker setup <connector>");
     process.exit(1);
   }
@@ -446,6 +503,8 @@ async function setup(connectorId: string | undefined): Promise<void> {
   switch (connectorId) {
     case "bybit":
       return setupBybit();
+    case "binance":
+      return setupBinance();
     case "metamask":
       return setupMetaMask();
     case "polymarket":

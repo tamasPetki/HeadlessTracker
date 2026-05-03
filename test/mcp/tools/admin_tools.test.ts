@@ -131,6 +131,68 @@ describe("setup_connector — Polymarket (no upstream call mocking needed since 
   });
 });
 
+describe("setup_connector — Binance (mocked /api/v3/account)", () => {
+  test("missing credentials block returns ok=false with clear error", async () => {
+    const r = await executeSetupConnector(
+      { connector: "binance" },
+      { vault: vault as never, store }
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("binance credentials required");
+  });
+
+  test("happy path: binance setup writes to vault + AccountStore", async () => {
+    globalThis.fetch = (async (): Promise<Response> =>
+      new Response(
+        JSON.stringify({ balances: [], canTrade: true, canWithdraw: false, accountType: "SPOT" }),
+        { status: 200 }
+      )
+    ) as unknown as typeof fetch;
+
+    const apiKey = "AbCdEfGhIjKl1234567890";
+    const r = await executeSetupConnector(
+      { connector: "binance", binance: { apiKey, apiSecret: "topsecret", includeFutures: false } },
+      { vault: vault as never, store }
+    );
+    expect(r.ok).toBe(true);
+    expect(r.accountId).toBe(`binance:key-${apiKey.slice(0, 6)}`);
+    expect(r.label).toContain("Binance Spot");
+
+    const stored = store.get(r.accountId!);
+    expect(stored).not.toBeNull();
+    expect(stored!.connectorId).toBe("binance");
+    // Critical: NO apiSecret in metadata. Only the public-safe fingerprint.
+    const meta = JSON.stringify(stored!.metadata ?? {});
+    expect(meta).not.toContain("topsecret");
+    expect(meta).toContain(apiKey.slice(0, 6));
+
+    // Vault stored the full credentials.
+    const credsResult = await vault.get("binance", `key-${apiKey.slice(0, 6)}`);
+    expect(credsResult.ok).toBe(true);
+    if (credsResult.ok) {
+      expect((credsResult.value as { apiSecret: string }).apiSecret).toBe("topsecret");
+    }
+  });
+
+  test("includeFutures=true reflected in label + metadata", async () => {
+    globalThis.fetch = (async (): Promise<Response> =>
+      new Response(
+        JSON.stringify({ balances: [], canTrade: true, canWithdraw: false, accountType: "SPOT" }),
+        { status: 200 }
+      )
+    ) as unknown as typeof fetch;
+
+    const r = await executeSetupConnector(
+      { connector: "binance", binance: { apiKey: "abcdef0", apiSecret: "s", includeFutures: true } },
+      { vault: vault as never, store }
+    );
+    expect(r.ok).toBe(true);
+    expect(r.label).toContain("Spot+Futures");
+    const stored = store.get(r.accountId!);
+    expect(stored!.metadata?.includeFutures).toBe(true);
+  });
+});
+
 describe("setup_connector — Solana (mocked RPC validation)", () => {
   test("missing credentials block returns ok=false with clear error", async () => {
     const r = await executeSetupConnector(

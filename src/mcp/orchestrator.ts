@@ -7,6 +7,7 @@
 
 import { defaultAccountStore, type AccountStore } from "../accounts.ts";
 import { Cache, defaultCache } from "../cache.ts";
+import { BinanceConnector } from "../connectors/binance.ts";
 import { BybitConnector } from "../connectors/bybit.ts";
 import { MetaMaskConnector } from "../connectors/metamask.ts";
 import { PolymarketConnector } from "../connectors/polymarket.ts";
@@ -18,6 +19,7 @@ import { err, ok } from "../types.ts";
 
 const CONNECTOR_FACTORIES: Record<ConnectorId, () => Connector> = {
   bybit: () => new BybitConnector(),
+  binance: () => new BinanceConnector(),
   metamask: () => new MetaMaskConnector(),
   polymarket: () => new PolymarketConnector(),
   solana: () => new SolanaConnector(),

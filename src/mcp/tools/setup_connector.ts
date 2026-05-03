@@ -22,6 +22,7 @@
 import { z } from "zod";
 
 import { defaultAccountStore, type AccountStore } from "../../accounts.ts";
+import { BinanceConnector } from "../../connectors/binance.ts";
 import { BybitConnector } from "../../connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../../connectors/metamask.ts";
 import { PolymarketConnector } from "../../connectors/polymarket.ts";
@@ -33,7 +34,7 @@ export const SETUP_CONNECTOR_TOOL_NAME = "setup_connector";
 
 export const SETUP_CONNECTOR_DESCRIPTION = [
   "Creates a new account by writing READ-ONLY credentials to the OS keychain.",
-  "Use when the user asks: 'add a Bybit account', 'connect my MetaMask wallet', 'set up Polymarket', 'connect my Solana wallet', 'add new exchange'.",
+  "Use when the user asks: 'add a Bybit account', 'connect Binance', 'connect my MetaMask wallet', 'set up Polymarket', 'connect my Solana wallet', 'add new exchange'.",
   "",
   "BEHAVIOR CONTRACT FOR YOU (the LLM):",
   "- After this tool succeeds, confirm ONLY the account label and account_id back to the user.",
@@ -43,11 +44,12 @@ export const SETUP_CONNECTOR_DESCRIPTION = [
   "Credentials are validated against the upstream API before they're persisted; if validation fails, nothing is written.",
   "Storage: OS keychain (macOS Keychain / Linux Secret Service / Windows Credential Vault) via @napi-rs/keyring. Same path as the CLI setup flow.",
   "",
-  "All four connectors use READ-ONLY credentials by design (Bybit 'Read' only, Etherscan is a public-data rate-limit token, Polymarket proxy wallet is already public, Solana addresses are public on-chain identifiers).",
+  "All five connectors use READ-ONLY credentials by design (Bybit 'Read' only, Binance 'Enable Reading' only, Etherscan is a public-data rate-limit token, Polymarket proxy wallet is already public, Solana addresses are public on-chain identifiers).",
   "",
-  "Inputs (one of bybit / metamask / polymarket / solana required):",
-  "  - connector: 'bybit' | 'metamask' | 'polymarket' | 'solana'",
+  "Inputs (one of bybit / binance / metamask / polymarket / solana required):",
+  "  - connector: 'bybit' | 'binance' | 'metamask' | 'polymarket' | 'solana'",
   "  - bybit: { apiKey, apiSecret, accountType: 'UNIFIED'|'CONTRACT'|'SPOT'|'FUND' }",
+  "  - binance: { apiKey, apiSecret, includeFutures (optional bool, default false), recvWindow (optional ms) }",
   "  - metamask: { address, etherscanApiKey, chainIds (number[]), trackCommonTokens (bool), hasEtherscanPro (bool) }",
   "  - polymarket: { proxyWallet (0x...), sizeThreshold (default 0.01) }",
   "  - solana: { address (base58), rpcUrl (optional premium RPC), dustThresholdUsd (optional, default 0.5) }",
@@ -57,6 +59,13 @@ const BYBIT_CREDS = z.object({
   apiKey: z.string().min(1),
   apiSecret: z.string().min(1),
   accountType: z.enum(["UNIFIED", "CONTRACT", "SPOT", "FUND"]),
+});
+
+const BINANCE_CREDS = z.object({
+  apiKey: z.string().min(1),
+  apiSecret: z.string().min(1),
+  includeFutures: z.boolean().optional(),
+  recvWindow: z.number().int().positive().optional(),
 });
 
 const METAMASK_CREDS = z.object({
@@ -79,16 +88,18 @@ const SOLANA_CREDS = z.object({
 });
 
 export const SETUP_CONNECTOR_INPUT_SCHEMA = {
-  connector: z.enum(["bybit", "metamask", "polymarket", "solana"]),
+  connector: z.enum(["bybit", "binance", "metamask", "polymarket", "solana"]),
   bybit: BYBIT_CREDS.optional(),
+  binance: BINANCE_CREDS.optional(),
   metamask: METAMASK_CREDS.optional(),
   polymarket: POLYMARKET_CREDS.optional(),
   solana: SOLANA_CREDS.optional(),
 };
 
 export interface SetupConnectorArgs {
-  connector: "bybit" | "metamask" | "polymarket" | "solana";
+  connector: "bybit" | "binance" | "metamask" | "polymarket" | "solana";
   bybit?: z.infer<typeof BYBIT_CREDS>;
+  binance?: z.infer<typeof BINANCE_CREDS>;
   metamask?: z.infer<typeof METAMASK_CREDS>;
   polymarket?: z.infer<typeof POLYMARKET_CREDS>;
   solana?: z.infer<typeof SOLANA_CREDS>;
@@ -116,6 +127,10 @@ export async function executeSetupConnector(
   if (args.connector === "bybit") {
     if (!args.bybit) return { ok: false, error: "bybit credentials required" };
     return setupBybit(args.bybit, vault, store);
+  }
+  if (args.connector === "binance") {
+    if (!args.binance) return { ok: false, error: "binance credentials required" };
+    return setupBinance(args.binance, vault, store);
   }
   if (args.connector === "metamask") {
     if (!args.metamask) return { ok: false, error: "metamask credentials required" };
@@ -199,6 +214,48 @@ async function setupMetaMask(
       chainIds: creds.chainIds,
       trackCommonTokens: fullCreds.trackCommonTokens,
       hasEtherscanPro: fullCreds.hasEtherscanPro,
+    },
+  };
+  store.upsert(account);
+  return { ok: true, accountId, label };
+}
+
+async function setupBinance(
+  creds: z.infer<typeof BINANCE_CREDS>,
+  vault: Vault,
+  store: AccountStore
+): Promise<SetupConnectorResult> {
+  const fullCreds: Record<string, unknown> = {
+    apiKey: creds.apiKey,
+    apiSecret: creds.apiSecret,
+    includeFutures: creds.includeFutures ?? false,
+  };
+  if (typeof creds.recvWindow === "number") fullCreds.recvWindow = creds.recvWindow;
+
+  const conn = new BinanceConnector();
+  const validation = await conn.validateCredentials(fullCreds);
+  if (!validation.ok) return { ok: false, error: `Binance validation failed: ${validation.error.message}` };
+
+  // Binance has a single account per API-key pair (unlike Bybit's UNIFIED/SPOT/etc.).
+  // Use a fingerprint of the apiKey (first 6 chars) as the account identifier so
+  // multiple Binance keys per user can coexist as separate Account rows.
+  const fingerprint = creds.apiKey.slice(0, 6);
+  const accountIdentifier = `key-${fingerprint}`;
+  const setResult = await vault.set("binance", accountIdentifier, fullCreds);
+  if (!setResult.ok) return { ok: false, error: `Vault write failed: ${setResult.error.message}` };
+
+  const accountId = `binance:${accountIdentifier}`;
+  const label = creds.includeFutures
+    ? `Binance Spot+Futures (${fingerprint}…)`
+    : `Binance Spot (${fingerprint}…)`;
+  const account: Account = {
+    id: accountId,
+    connectorId: "binance",
+    label,
+    createdAt: Date.now(),
+    metadata: {
+      keyFingerprint: fingerprint,
+      includeFutures: fullCreds.includeFutures,
     },
   };
   store.upsert(account);

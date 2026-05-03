@@ -148,6 +148,11 @@ function describeMetadata(connectorId: string, meta: Record<string, unknown>): s
   if (connectorId === "bybit") {
     return `${meta.accountType ?? "?"} account`;
   }
+  if (connectorId === "binance") {
+    const fp = typeof meta.keyFingerprint === "string" ? meta.keyFingerprint : "?";
+    const fut = meta.includeFutures ? "Spot + Futures" : "Spot only";
+    return `key ${fp}…, ${fut}`;
+  }
   if (connectorId === "polymarket") {
     return `proxy ${typeof meta.proxyWallet === "string" ? (meta.proxyWallet.slice(0, 6) + "…" + meta.proxyWallet.slice(-4)) : "?"}`;
   }
@@ -165,7 +170,7 @@ function describeMetadata(connectorId: string, meta: Record<string, unknown>): s
 
 const SECURITY_DISCLOSURE = `<div class="disclosure">
   <strong>Security:</strong> Credentials submitted here transit Claude Desktop's process en route to your OS keychain.
-  All four connectors use READ-ONLY credentials by design (Bybit "Read" only, no Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public; Solana addresses are public on-chain identifiers).
+  All five connectors use READ-ONLY credentials by design (Bybit "Read" only, no Withdraw; Binance "Enable Reading" only, no Trade or Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public; Solana addresses are public on-chain identifiers).
   Worst-case leak is a portfolio-read, never a fund movement.
   For the strictest path that NEVER touches Claude Desktop, use the CLI: <code>bun run setup &lt;connector&gt;</code>.
 </div>`;
@@ -177,6 +182,7 @@ async function renderAddAccount(): Promise<void> {
       ${SECURITY_DISCLOSURE}
       <div class="connector-buttons">
         <button class="btn-primary" data-connector="bybit">Bybit (read-only API key)</button>
+        <button class="btn-primary" data-connector="binance">Binance (read-only API key)</button>
         <button class="btn-primary" data-connector="metamask">MetaMask / EVM wallet</button>
         <button class="btn-primary" data-connector="solana">Solana wallet</button>
         <button class="btn-primary" data-connector="polymarket">Polymarket (wallet only)</button>
@@ -212,6 +218,28 @@ function renderConnectorForm(connector: string): void {
         apiKey: data.apiKey,
         apiSecret: data.apiSecret,
         accountType: data.accountType as "UNIFIED" | "CONTRACT" | "SPOT" | "FUND",
+      },
+    }));
+    return;
+  }
+  if (connector === "binance") {
+    slot.innerHTML = `
+      <h3>Binance setup</h3>
+      <p class="muted">Create a read-only API key at <a href="https://www.binance.com/en/my/settings/api-management" target="_blank">binance.com/en/my/settings/api-management</a>. <strong>Required: "Enable Reading" only.</strong> Leave Spot Trading + Withdrawals OFF. Optional: "Enable Futures" for futures wallet + open positions.</p>
+      <form id="form-binance" class="form-grid">
+        <label>API Key<input name="apiKey" type="text" required autocomplete="off"></label>
+        <label>API Secret<input name="apiSecret" type="password" required autocomplete="off"></label>
+        <label class="inline"><input type="checkbox" name="includeFutures">Include Futures (USD-margined wallet + open positions)</label>
+        <small class="muted">Without "Enable Futures" permission, this gets soft-skipped with a warning instead of failing.</small>
+        <button type="submit" class="btn-primary">Validate &amp; Save</button>
+      </form>
+      <div id="form-result"></div>`;
+    wireForm("form-binance", async (data) => callTool("setup_connector", {
+      connector: "binance",
+      binance: {
+        apiKey: data.apiKey,
+        apiSecret: data.apiSecret,
+        includeFutures: data.includeFutures === "on",
       },
     }));
     return;

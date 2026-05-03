@@ -2,6 +2,45 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.13.0 — 2026-05-03
+
+**New connector: Binance.** Spot account holdings + optional Futures wallet/positions, read-only. HMAC-SHA256 signed REST API calls via Node's built-in `crypto` (no SDK dependency, ~390 lines of code). Mirrors Bybit's exchange-style credential pattern (apiKey + apiSecret) with one twist: a single Binance API key covers Spot/Margin/Futures, so we toggle Futures via an `includeFutures` flag rather than separate accountTypes.
+
+### Added
+
+- **`BinanceConnector`** (`src/connectors/binance.ts`):
+  - `validateCredentials` — signed `GET /api/v3/account` (weight 20). Catches 401/403 → `auth_failed`, 429/418 → `rate_limited`, errors → `upstream_error`.
+  - `fetchHoldings`:
+    - **Spot**: `GET /api/v3/account?omitZeroBalances=true` → one Holding per non-zero balance (free + locked merged into `quantity`, both surfaced in `metadata`).
+    - **Pricing**: one batch `GET /api/v3/ticker/24hr?type=MINI&symbols=[...]` for all non-stablecoin assets at once (weight 2 for ≤20 symbols, 40 for ≤100, fallback to all-symbols at 80 if user holds >100 distinct assets). Stablecoins (USDT/USDC/BUSD/FDUSD/TUSD/DAI/USDP/USDS) are priced at $1 without an API call. Missing tickers → `currentPrice: undefined` (honest unknown), not 0.
+    - **Optional Futures** (when `creds.includeFutures === true`): signed `GET /fapi/v2/account` → emits separate `FUTURES_WALLET` Holdings per non-zero futures asset + `FUTURES_POSITION` Holdings per open position (with `side`, `entryPrice`, `markPrice`, `unrealizedPnl`, `leverage`, `marginType`, `liquidationPrice` in metadata). Soft-skip on auth_failed: spot data still returned, futures absence surfaces as a `__chainWarnings` message on the first holding.
+  - `fetchTransactions` — returns `ok([])` for v0.13. Per-symbol `/api/v3/myTrades` calls cost weight 10 each and require iterating user's traded pairs; deferred to v0.14 with careful weight budgeting.
+  - Default cache TTL: 120s (matches Bybit).
+- **CLI setup**: `headless-tracker setup binance` — interactive prompts for API key/secret + futures opt-in. Same flow shape as the other exchanges.
+- **MCP `setup_connector` tool**: extended discriminated union to accept `connector: "binance"` + `binance: { apiKey, apiSecret, includeFutures?, recvWindow? }`. Account identifier uses a 6-char fingerprint of the apiKey (`binance:key-AbCdEf`) so multiple Binance accounts per user can coexist.
+- **Settings GUI** (Settings MCP App):
+  - Add Account tab: new "Binance" button + form. API key / secret fields, `Include Futures` checkbox with hint about soft-skip behavior. Brief permission warning text (Reading only, no Trade/Withdraw).
+  - Accounts tab: Binance accounts get a `binance` tag (Binance brand yellow `#f3ba2f`) and metadata summary (`key AbCdEf…, Spot only` or `Spot + Futures`).
+  - Security disclosure: updated to mention all five connectors and Binance's "Enable Reading" requirement.
+- **`refresh_data` + `list_accounts` tools**: Binance now an accepted value in the `connector` enum.
+- **Test coverage**: 16 new tests.
+  - `test/connectors/binance.test.ts`: identity, credential validation (5 cases including 401/429 mapping), happy path with batch ticker, honest-unknown for missing pairs, includeFutures + 401 soft-skip, includeFutures full path (3 holdings: SPOT + FUTURES_WALLET + FUTURES_POSITION), 429 propagates as rate_limited, empty account `ok([])`, fetchTransactions placeholder.
+  - `test/mcp/tools/admin_tools.test.ts`: setup_connector binance happy path (verifies `apiSecret` NEVER ends up in account metadata, only the public fingerprint), `includeFutures=true` reflected in label.
+
+### Changed
+
+- `ConnectorId` type: now `"bybit" | "metamask" | "polymarket" | "solana" | "binance"`. Cache TTL table updated.
+- `SERVER_VERSION` 0.12.0 → 0.13.0; `package.json` bump.
+- `SERVER_INSTRUCTIONS` (system-prompt injection): mentions Binance in the connector list and the Settings routing hint.
+- Settings security disclosure: "All four connectors" → "All five connectors" with Binance-specific permission note.
+
+### Behavior caveats
+
+- **Futures permission**: if you tick "Include Futures" but your API key lacks the futures permission, the connector soft-skips with a warning surfaced via `__chainWarnings` on the first holding. Spot data still works. To enable: edit the API key in Binance settings and add "Enable Futures".
+- **Geographic restrictions**: Binance.com is unavailable in some jurisdictions (US users → binance.us, which has a different API at `api.binance.us`). v0.13 hard-codes `api.binance.com`; binance.us support is deferred. If the user is geo-blocked the connector returns `auth_failed` with a 451-ish error (Binance's WAF returns 451 / 403 with "Service unavailable from a restricted location").
+- **Tx history empty**: `fetchTransactions` returns `ok([])`. PnL won't show realized gains for Binance until v0.14. Cost basis remains "honest unknown" (null) — the existing contract.
+- **Balance scope**: only the **Spot** account (and optional Futures wallet/positions) is fetched. Earn / Trading Bots / Funding sub-wallets via `/sapi/v1/asset/wallet/balance` are deferred — those scattered balances aren't usually large enough to matter for portfolio tracking, and adding the call adds 30+ weight per fetch.
+
 ## v0.12.0 — 2026-05-03
 
 **New connector: Solana wallets.** Read-only on-chain tracking for SOL + SPL tokens via the public Solana RPC + Jupiter Price API v2. No API key required, multi-wallet supported, optional premium RPC URL for power users. Mirrors the MetaMask credential pattern (multi-address per Account) so the Settings UI's Wallets tab now manages BOTH EVM and Solana accounts from one place.
