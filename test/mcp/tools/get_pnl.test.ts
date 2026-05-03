@@ -539,7 +539,8 @@ describe("executeGetPnl — windowDelta (timeframe-driven)", () => {
     expect(w.pricedSymbols).toBe(0);
     expect(w.skippedSymbols).toBe(1);
     expect(w.skippedReasons[0]).toContain("OBSCURETOKEN");
-    expect(w.skippedReasons[0]).toContain("no CoinGecko mapping");
+    // Reason text changed in v0.10.3 when dynamic top-250 fallback was added.
+    expect(w.skippedReasons[0]).toMatch(/CoinGecko/i);
   });
 
   test("multiple holdings of same symbol share one historical price fetch", async () => {

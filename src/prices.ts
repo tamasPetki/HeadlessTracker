@@ -30,11 +30,21 @@ const HISTORICAL_TTL_SEC = 7 * 24 * 60 * 60;
 const CACHE_NS = "_prices";
 function spotKey(coinId: string): string { return `spot:${coinId}`; }
 function histKey(coinId: string, dateStr: string): string { return `hist:${coinId}:${dateStr}`; }
+const MARKETS_CACHE_KEY = "markets:top250";
+const MARKETS_TTL_SEC = 7 * 24 * 60 * 60;
+const MARKETS_PAGE_SIZE = 250;
 
-// Static symbol → CoinGecko id mapping. Only the cases HT cares about today;
-// add more as connectors surface them. Keys are uppercase for case-insensitive
-// lookup.
+// Static symbol → CoinGecko id mapping. Curated for ambiguity-resolution and
+// fast-path lookup: when multiple coins share a symbol on CoinGecko (e.g.
+// "JUP" → Jupiter the Solana DEX vs "Jupiter Project" — different coins
+// entirely), the static entry pins the one HT users actually mean. For
+// symbols not in this map, the PriceService falls back to a cached
+// /coins/markets top-250-by-market-cap lookup (7-day TTL) so the long tail
+// is auto-resolved without manual maintenance. Add an entry here only when
+// you need to override the dynamic resolution (e.g. ambiguous symbols where
+// the highest-cap match isn't the right one).
 const COINGECKO_IDS: Record<string, string> = {
+  // Majors
   BTC: "bitcoin",
   WBTC: "wrapped-bitcoin",
   ETH: "ethereum",
@@ -42,16 +52,10 @@ const COINGECKO_IDS: Record<string, string> = {
   USDC: "usd-coin",
   USDT: "tether",
   DAI: "dai",
+  // L1s
   SOL: "solana",
   BNB: "binancecoin",
-  POL: "matic-network",
-  MATIC: "matic-network",
   AVAX: "avalanche-2",
-  ARB: "arbitrum",
-  OP: "optimism",
-  LINK: "chainlink",
-  UNI: "uniswap",
-  AAVE: "aave",
   ADA: "cardano",
   DOT: "polkadot",
   XRP: "ripple",
@@ -63,6 +67,25 @@ const COINGECKO_IDS: Record<string, string> = {
   FTM: "fantom",
   CRO: "crypto-com-chain",
   ATOM: "cosmos",
+  // L2s
+  POL: "matic-network",
+  MATIC: "matic-network",
+  ARB: "arbitrum",
+  OP: "optimism",
+  // DeFi blue chips
+  LINK: "chainlink",
+  UNI: "uniswap",
+  AAVE: "aave",
+  // Resolutions for symbols where the highest-cap CoinGecko match collides
+  // (we verified each on the search API; rank pinned to the right one).
+  JUP: "jupiter-exchange-solana",        // not "jupiter" (Jupiter Project, rank 4399)
+  HYPE: "hyperliquid",
+  ENA: "ethena",
+  DEEP: "deep",                           // DeepBook (Sui)
+  PUMP: "pump-fun",                       // Pump.fun, not "pump" or "big-pump"
+  SPEC: "spectral",
+  MON: "monad",
+  VVV: "venice-token",
 };
 
 export interface PriceData {
@@ -73,8 +96,20 @@ export interface PriceData {
   source: "coingecko" | "cache";
 }
 
+// Synchronous static-only lookup. Used for the fast path where we don't want
+// to await a network call (e.g. a hot tool handler). For full coverage including
+// long-tail symbols, callers should use PriceService.resolveCoinId() which falls
+// back to the cached top-250-by-market-cap list.
 export function symbolToCoinGeckoId(symbol: string): string | null {
   return COINGECKO_IDS[symbol.toUpperCase()] ?? null;
+}
+
+// Shape of one row returned by /coins/markets (we only consume the fields we need).
+interface CoinMarketRow {
+  id: string;
+  symbol: string;
+  name: string;
+  market_cap_rank: number | null;
 }
 
 export interface PriceServiceOptions {
@@ -89,6 +124,55 @@ export class PriceService {
   constructor(opts: PriceServiceOptions = {}) {
     this.cache = opts.cache ?? defaultCache();
     this.apiKey = opts.apiKey ?? process.env.COINGECKO_API_KEY;
+  }
+
+  // Resolve a symbol to a CoinGecko coin id. Two-tier:
+  //   1. Static map (fast, deterministic, hand-curated for ambiguous symbols)
+  //   2. Cached top-250-by-market-cap list (one upstream call, 7-day TTL)
+  // Returns null when neither resolves. Honors AbortSignal end-to-end.
+  //
+  // Why top-250: covers the vast majority of what users actually hold in
+  // exchange/wallet portfolios, and the /coins/markets endpoint returns the
+  // rank info we need to pick the dominant coin when symbols collide. Outside
+  // the top 250 (e.g. brand-new tokens, micro-caps), the user can extend
+  // COINGECKO_IDS manually — that path stays open.
+  async resolveCoinId(symbol: string, signal?: AbortSignal): Promise<string | null> {
+    const upper = symbol.toUpperCase();
+    const fromStatic = COINGECKO_IDS[upper];
+    if (fromStatic) return fromStatic;
+    const map = await this.loadMarketsMap(signal);
+    return map?.[upper] ?? null;
+  }
+
+  // Internal: lazy-load top-250 coins by market cap, build symbol → id map,
+  // cache in SQLite for 7 days. The /coins/markets endpoint returns coins
+  // already sorted by market_cap_desc; for symbol collisions we keep the
+  // first-seen entry (which is the highest-cap one).
+  private async loadMarketsMap(signal?: AbortSignal): Promise<Record<string, string> | null> {
+    const cached = this.cache.get<Record<string, string>>(CACHE_NS, MARKETS_CACHE_KEY);
+    // For the markets snapshot, even "stale" data is far more useful than
+    // nothing — the list of top-250 coins changes slowly, so we accept the
+    // stale entry while refreshing in the background isn't worth the
+    // complexity here. Treat any cache hit as good.
+    if (cached) return cached.value;
+
+    const url = `${COINGECKO_BASE}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${MARKETS_PAGE_SIZE}&page=1&sparkline=false`;
+    const res = await this.fetch<CoinMarketRow[]>(url, signal);
+    if (!res.ok) return null;
+    // Defensive: CoinGecko sometimes returns an object on rate-limit instead
+    // of an array even with a 200. Treat non-array as empty so we don't crash.
+    if (!Array.isArray(res.value)) return null;
+
+    const map: Record<string, string> = {};
+    for (const row of res.value) {
+      const sym = row.symbol?.toUpperCase();
+      if (!sym) continue;
+      // First-seen wins: rows are pre-sorted by market_cap_desc, so the
+      // highest-cap coin for each symbol claims the slot.
+      if (!map[sym]) map[sym] = row.id;
+    }
+    this.cache.set(CACHE_NS, MARKETS_CACHE_KEY, map, MARKETS_TTL_SEC);
+    return map;
   }
 
   // Single-coin spot price. Returns null on cache miss + API failure (caller

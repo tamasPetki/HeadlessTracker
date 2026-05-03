@@ -21,7 +21,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-describe("symbolToCoinGeckoId", () => {
+describe("symbolToCoinGeckoId (static map only)", () => {
   test("known symbols map to ids (case-insensitive)", () => {
     expect(symbolToCoinGeckoId("BTC")).toBe("bitcoin");
     expect(symbolToCoinGeckoId("btc")).toBe("bitcoin");
@@ -31,8 +31,120 @@ describe("symbolToCoinGeckoId", () => {
     expect(symbolToCoinGeckoId("POL")).toBe("matic-network");
   });
 
-  test("unknown symbol returns null", () => {
+  test("ambiguity-resolved symbols pin the right CoinGecko id", () => {
+    // Each was verified against the CoinGecko search API at v0.10.3 time.
+    // These are tokens HT users actually hold on Bybit/MetaMask; without
+    // pinning, a /coins/list lookup might pick a low-cap collision.
+    expect(symbolToCoinGeckoId("JUP")).toBe("jupiter-exchange-solana");
+    expect(symbolToCoinGeckoId("HYPE")).toBe("hyperliquid");
+    expect(symbolToCoinGeckoId("ENA")).toBe("ethena");
+    expect(symbolToCoinGeckoId("DEEP")).toBe("deep");
+    expect(symbolToCoinGeckoId("PUMP")).toBe("pump-fun");
+    expect(symbolToCoinGeckoId("SPEC")).toBe("spectral");
+    expect(symbolToCoinGeckoId("MON")).toBe("monad");
+    expect(symbolToCoinGeckoId("VVV")).toBe("venice-token");
+  });
+
+  test("unknown symbol returns null (sync static-only path)", () => {
     expect(symbolToCoinGeckoId("NOTAREALCOIN")).toBeNull();
+  });
+});
+
+describe("PriceService.resolveCoinId (static + dynamic)", () => {
+  test("static hit returns immediately, no fetch", async () => {
+    let calls = 0;
+    globalThis.fetch = (async (): Promise<Response> => {
+      calls++;
+      return new Response("[]", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const id = await svc.resolveCoinId("BTC");
+    expect(id).toBe("bitcoin");
+    expect(calls).toBe(0);
+  });
+
+  test("symbol outside static map → fetches /coins/markets and resolves from cache", async () => {
+    let calls = 0;
+    globalThis.fetch = (async (url: string | URL): Promise<Response> => {
+      calls++;
+      expect(String(url)).toContain("/coins/markets");
+      expect(String(url)).toContain("order=market_cap_desc");
+      return new Response(
+        JSON.stringify([
+          { id: "shiba-inu", symbol: "shib", name: "Shiba Inu", market_cap_rank: 14 },
+          { id: "dogecoin", symbol: "doge", name: "Dogecoin", market_cap_rank: 9 },
+        ]),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const shib = await svc.resolveCoinId("SHIB");
+    expect(shib).toBe("shiba-inu");
+    expect(calls).toBe(1);
+
+    // Second resolve hits cache, no second fetch.
+    const doge = await svc.resolveCoinId("DOGE");
+    expect(doge).toBe("dogecoin");
+    expect(calls).toBe(1);
+  });
+
+  test("symbol collision in /coins/markets → first row (highest market cap) wins", async () => {
+    // CoinGecko returns rows sorted by market_cap_desc. Two coins share the
+    // symbol "BONK"; the higher-cap one (Solana BONK) appears first and
+    // claims the slot.
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify([
+          { id: "bonk", symbol: "bonk", name: "Bonk", market_cap_rank: 50 },
+          { id: "bonk-evm-clone", symbol: "bonk", name: "Bonk EVM Clone", market_cap_rank: 5000 },
+        ]),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const r = await svc.resolveCoinId("BONK");
+    expect(r).toBe("bonk");
+  });
+
+  test("symbol not in static map and not in top-250 returns null", async () => {
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(JSON.stringify([{ id: "bitcoin", symbol: "btc", name: "Bitcoin", market_cap_rank: 1 }]), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const r = await svc.resolveCoinId("OBSCURETOKEN");
+    expect(r).toBeNull();
+  });
+
+  test("CoinGecko fetch failure → returns null, doesn't throw", async () => {
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response("rate limited", { status: 429 });
+    }) as unknown as typeof fetch;
+
+    const r = await svc.resolveCoinId("SHIB");
+    expect(r).toBeNull();
+  });
+
+  test("CoinGecko returns non-array (e.g. error body with 200) → returns null defensively", async () => {
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(JSON.stringify({ status: { error_code: 429, error_message: "rate limited" } }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const r = await svc.resolveCoinId("SHIB");
+    expect(r).toBeNull();
+  });
+
+  test("static map takes precedence over dynamic — pinned ambiguous symbol stays pinned", async () => {
+    // /coins/markets returns "JUP → some-other-jupiter" but the static map
+    // wins because JUP is explicitly pinned.
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify([{ id: "wrong-jupiter", symbol: "jup", name: "Wrong Jupiter", market_cap_rank: 50 }]),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const r = await svc.resolveCoinId("JUP");
+    expect(r).toBe("jupiter-exchange-solana");
   });
 });
 

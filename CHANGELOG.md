@@ -2,6 +2,34 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.10.3 — 2026-05-03
+
+User feedback from the dashboard: a real Bybit portfolio (HYPE, JUP, ENA, DEEP, PUMP, SPEC, MON, VVV, ...) showed "5 priced, 8 skipped" on the Weekly tab — most holdings missing from the static `COINGECKO_IDS` map and `windowDelta` excluding them. The static map was capped at ~28 majors; everything else fell off a cliff.
+
+### Added
+
+- **8 ambiguity-resolved entries** to the static `COINGECKO_IDS` map: `JUP` → `jupiter-exchange-solana`, `HYPE` → `hyperliquid`, `ENA` → `ethena`, `DEEP` → `deep`, `PUMP` → `pump-fun`, `SPEC` → `spectral`, `MON` → `monad`, `VVV` → `venice-token`. Each verified against the CoinGecko search API to pin the correct id (e.g., `JUP` collides with a separate "Jupiter Project" coin at rank 4399, which we explicitly avoid).
+- **Dynamic CoinGecko top-250 fallback** in `PriceService.resolveCoinId()`. When a symbol isn't in the static map, the service lazy-fetches `/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1` once per 7 days and builds a symbol → id map. For symbol collisions in that list (the same ticker shared by multiple coins), the highest-cap one wins because the rows are pre-sorted by market_cap_desc and we use first-seen-wins.
+- **Defensive non-array guard**: CoinGecko occasionally returns an object body with HTTP 200 on rate-limit instead of the documented array. The map loader now treats non-array as a clean miss instead of crashing.
+
+### Changed
+
+- **`get_pnl` window-delta resolution path** now calls `priceService.resolveCoinId()` (async, two-tier) instead of the sync-only `symbolToCoinGeckoId()`. Single dynamic markets fetch per `get_pnl` call covers all symbols in the loop.
+- **Skipped-reason text** for unrecognized symbols changed from "no CoinGecko mapping (extend prices.ts COINGECKO_IDS to support)" to "not in CoinGecko top 250 — add to COINGECKO_IDS in src/prices.ts to track". Reflects that we've already tried both static AND dynamic before giving up; the user only needs to extend the static list for genuine long-tail micro-caps that fall outside the top 250.
+- README status line bumped to v0.10.3 + 241 tests.
+- `SERVER_VERSION` 0.10.2 → 0.10.3; package.json bump.
+
+### Tests
+
+- 8 new `PriceService.resolveCoinId` tests in `test/prices.test.ts`: static-only fast path (no fetch), dynamic miss + dynamic hit + cache reuse on second resolve, symbol collision (highest cap wins), miss falls through to null, fetch failure handled, non-array body handled defensively, static takes precedence over dynamic (pinned ambiguous symbol stays pinned even if /coins/markets returns a different id for it).
+- 1 existing test updated for the new skipped-reason wording.
+- `symbolToCoinGeckoId` now has an explicit "ambiguity-resolved symbols" assertion covering all 8 user-reported additions.
+- 233 → 241 tests, typecheck clean.
+
+### Forward note
+
+If future user portfolios hit symbols outside the top 250 (genuine micro-caps), they show up in the Weekly tab's "skipped" disclosure with an actionable hint pointing at `src/prices.ts`. Adding a one-line entry there fixes the long tail without rebuilding anything else.
+
 ## v0.10.2 — 2026-05-02
 
 User feedback: the asset-class donut on the Portfolio tab was degenerate. With only crypto connectors today (Bybit + MetaMask + Polymarket), most users see one ~100% slice for "crypto" with maybe a sliver of "prediction" — no signal. Replaced with a more useful breakdown.

@@ -19,7 +19,7 @@ import { z } from "zod";
 import { defaultOrchestrator, type Orchestrator } from "../orchestrator.ts";
 import type { Holding, Transaction } from "../../types.ts";
 import { computeCostBasisWithMethod, type CostBasisMethod } from "../../cost_basis.ts";
-import { defaultPriceService, PriceService, symbolToCoinGeckoId } from "../../prices.ts";
+import { defaultPriceService, PriceService } from "../../prices.ts";
 
 export const GET_PNL_TOOL_NAME = "get_pnl";
 
@@ -360,7 +360,9 @@ async function computeWindowDelta(
   const date = timeframeToDate(timeframe);
 
   // Collect priceable crypto holdings. Skip non-crypto (predictions/cash/stocks)
-  // and crypto without a CoinGecko mapping.
+  // and crypto where we can't resolve to a CoinGecko id.
+  // Resolution is two-tier: static map → cached top-250-by-market-cap list. A
+  // single dynamic markets fetch covers all symbols in this loop.
   interface PriceableHolding {
     coinId: string;
     quantity: number;
@@ -373,9 +375,9 @@ async function computeWindowDelta(
     if (h.assetClass !== "crypto") continue;
     if (h.quantity === undefined || h.quantity <= 0) continue;
     if (h.value === undefined) continue;
-    const coinId = symbolToCoinGeckoId(h.symbol);
+    const coinId = await priceService.resolveCoinId(h.symbol);
     if (!coinId) {
-      skippedReasons.push(`${h.symbol}: no CoinGecko mapping (extend prices.ts COINGECKO_IDS to support)`);
+      skippedReasons.push(`${h.symbol}: not in CoinGecko top 250 — add to COINGECKO_IDS in src/prices.ts to track`);
       continue;
     }
     priceable.push({ coinId, quantity: h.quantity, currentValue: h.value });
