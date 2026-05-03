@@ -179,41 +179,61 @@ async function setupBybit(): Promise<void> {
 
   const apiKey = await readLine("API Key: ");
   const apiSecret = await readSecret("API Secret:");
-  const accountTypeRaw = await readLine("Account type (UNIFIED/CONTRACT/SPOT/FUND) [UNIFIED]: ");
-  const accountType = (accountTypeRaw || "UNIFIED").toUpperCase() as "UNIFIED" | "CONTRACT" | "SPOT" | "FUND";
 
-  if (!["UNIFIED", "CONTRACT", "SPOT", "FUND"].includes(accountType)) {
+  const accountTypeRaw = await readLine("Primary account type (UNIFIED/CONTRACT/SPOT/FUND) [UNIFIED]: ");
+  const VALID = ["UNIFIED", "CONTRACT", "SPOT", "FUND"] as const;
+  type Bt = typeof VALID[number];
+  const accountType = (accountTypeRaw || "UNIFIED").toUpperCase() as Bt;
+  if (!VALID.includes(accountType)) {
     console.error(`Invalid account type: ${accountType}`);
     process.exit(1);
   }
 
+  // v0.13.2: ask whether to ALSO fan out to other account types. Most common
+  // pattern: UNIFIED + FUND, so you can see both your trading wallet AND
+  // your funding wallet (USDT parking, deposit holding, etc.).
+  console.log("\nBybit segregates funds across multiple account types. Common pattern:");
+  console.log("  - UNIFIED = main trading wallet (spot + derivatives unified, post-2023)");
+  console.log("  - FUND = funding wallet (deposits, transfers, p2p settlements)");
+  console.log("Same API key covers all of them. We can fan out to track multiple at once.");
+  const others = VALID.filter((t) => t !== accountType);
+  const extras: Bt[] = [];
+  for (const t of others) {
+    const yn = await readLine(`Also track ${t}? (y/N): `);
+    if (yn.trim().toLowerCase() === "y") extras.push(t);
+  }
+
+  const fullCreds: Record<string, unknown> = { apiKey, apiSecret, accountType };
+  if (extras.length > 0) fullCreds.accountTypes = extras;
+
   const connector = new BybitConnector();
   console.log("\nValidating credentials...");
-  const validation = await connector.validateCredentials({ apiKey, apiSecret, accountType });
+  const validation = await connector.validateCredentials(fullCreds);
   if (!validation.ok) {
     console.error(`Validation failed: ${validation.error.message}`);
     process.exit(1);
   }
 
   const vault = defaultVault();
-  const setResult = await vault.set("bybit", accountType, { apiKey, apiSecret, accountType });
+  const setResult = await vault.set("bybit", accountType, fullCreds);
   if (!setResult.ok) {
     console.error(`Vault write failed: ${setResult.error.message}`);
     process.exit(1);
   }
 
-  // Register Account in the SQLite registry (Day 2 addition).
+  const allTypes = [accountType, ...extras];
   const accounts = defaultAccountStore();
+  const label = allTypes.length === 1 ? `Bybit ${accountType}` : `Bybit ${allTypes.join("+")}`;
   const account: Account = {
     id: `bybit:${accountType}`,
     connectorId: "bybit",
-    label: `Bybit ${accountType}`,
+    label,
     createdAt: Date.now(),
-    metadata: { accountType },
+    metadata: { accountType, accountTypes: allTypes },
   };
   accounts.upsert(account);
 
-  console.log(`\n✓ Bybit ${accountType} configured. Account ID: bybit:${accountType}`);
+  console.log(`\n✓ ${label} configured. Account ID: bybit:${accountType}`);
   console.log("  Test it: ask Claude Desktop \"what's in my Bybit account?\"\n");
 }
 

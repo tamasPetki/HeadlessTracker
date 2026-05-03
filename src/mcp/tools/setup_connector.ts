@@ -48,7 +48,7 @@ export const SETUP_CONNECTOR_DESCRIPTION = [
   "",
   "Inputs (one of bybit / binance / metamask / polymarket / solana required):",
   "  - connector: 'bybit' | 'binance' | 'metamask' | 'polymarket' | 'solana'",
-  "  - bybit: { apiKey, apiSecret, accountType: 'UNIFIED'|'CONTRACT'|'SPOT'|'FUND' }",
+  "  - bybit: { apiKey, apiSecret, accountType: 'UNIFIED'|'CONTRACT'|'SPOT'|'FUND' (primary, also the account ID), accountTypes?: array of additional types to fan out across (e.g. ['FUND'] alongside UNIFIED so funding-wallet balances are tracked too) }",
   "  - binance: { apiKey, apiSecret, includeFutures (optional bool, default false), recvWindow (optional ms) }",
   "  - metamask: { address, etherscanApiKey, chainIds (number[]), trackCommonTokens (bool), hasEtherscanPro (bool) }",
   "  - polymarket: { proxyWallet (0x...), sizeThreshold (default 0.01) }",
@@ -58,7 +58,14 @@ export const SETUP_CONNECTOR_DESCRIPTION = [
 const BYBIT_CREDS = z.object({
   apiKey: z.string().min(1),
   apiSecret: z.string().min(1),
+  // Primary type determines the account ID (`bybit:UNIFIED`, etc.) and is
+  // also the type validate-credentials probes. UNIFIED is the v0.13+ default.
   accountType: z.enum(["UNIFIED", "CONTRACT", "SPOT", "FUND"]),
+  // Optional: extra types to fan out across in fetchHoldings/fetchTransactions.
+  // Common pattern: ["FUND"] alongside UNIFIED so funding-wallet balances
+  // (USDT parking, etc.) aren't invisible. Same API key covers all types
+  // the user has enabled.
+  accountTypes: z.array(z.enum(["UNIFIED", "CONTRACT", "SPOT", "FUND"])).optional(),
 });
 
 const BINANCE_CREDS = z.object({
@@ -156,17 +163,34 @@ async function setupBybit(
   const validation = await conn.validateCredentials(creds);
   if (!validation.ok) return { ok: false, error: `Bybit validation failed: ${validation.error.message}` };
 
-  const setResult = await vault.set("bybit", creds.accountType, creds);
+  // Persist creds; accountTypes (if any) extend the fan-out scope at fetch time.
+  const fullCreds: Record<string, unknown> = {
+    apiKey: creds.apiKey,
+    apiSecret: creds.apiSecret,
+    accountType: creds.accountType,
+  };
+  if (creds.accountTypes && creds.accountTypes.length > 0) {
+    fullCreds.accountTypes = creds.accountTypes;
+  }
+  const setResult = await vault.set("bybit", creds.accountType, fullCreds);
   if (!setResult.ok) return { ok: false, error: `Vault write failed: ${setResult.error.message}` };
 
+  // Account ID stays based on the primary type so existing v0.7-v0.13 vaults
+  // round-trip cleanly. Label reflects the full fan-out so the user can see
+  // what's being tracked at a glance.
+  const allTypes = creds.accountTypes && creds.accountTypes.length > 0
+    ? Array.from(new Set([creds.accountType, ...creds.accountTypes]))
+    : [creds.accountType];
   const accountId = `bybit:${creds.accountType}`;
-  const label = `Bybit ${creds.accountType}`;
+  const label = allTypes.length === 1
+    ? `Bybit ${creds.accountType}`
+    : `Bybit ${allTypes.join("+")}`;
   const account: Account = {
     id: accountId,
     connectorId: "bybit",
     label,
     createdAt: Date.now(),
-    metadata: { accountType: creds.accountType },
+    metadata: { accountType: creds.accountType, accountTypes: allTypes },
   };
   store.upsert(account);
   return { ok: true, accountId, label };

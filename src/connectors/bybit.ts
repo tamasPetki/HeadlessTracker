@@ -15,23 +15,53 @@ import type { Connector, ConnectorContext, ConnectorCredentials } from "./types.
 import type { Holding, Result, Transaction } from "../types.ts";
 import { err, ok } from "../types.ts";
 
+export type BybitAccountType = "UNIFIED" | "CONTRACT" | "SPOT" | "FUND";
+
+const VALID_ACCOUNT_TYPES: ReadonlyArray<BybitAccountType> = ["UNIFIED", "CONTRACT", "SPOT", "FUND"];
+
 interface BybitCreds extends ConnectorCredentials {
   apiKey: string;
   apiSecret: string;
-  // "UNIFIED" (post-2023 standard), "CONTRACT" (perp/futures legacy), "SPOT" (legacy spot),
-  // "FUND" (funding wallet). Most users want UNIFIED.
-  accountType: "UNIFIED" | "CONTRACT" | "SPOT" | "FUND";
+  // Legacy single-type field. New code should populate accountTypes[]; we keep
+  // accountType for back-compat with v0.7.x vaults. Used as the primary
+  // identifier when deriving account IDs (`bybit:UNIFIED`, etc.).
+  accountType: BybitAccountType;
+  // v0.13.2+: additional account types this credential should fan out across
+  // in fetchHoldings / fetchTransactions. A Bybit API key always covers all
+  // account types the user has enabled — this just tells us WHICH ones to
+  // query. If absent, we query only `accountType`. Common pattern: tracking
+  // UNIFIED + FUND together so funding-wallet balances aren't invisible.
+  accountTypes?: BybitAccountType[];
   // testnet=true uses api-testnet.bybit.com, useful for setup validation.
   testnet?: boolean;
 }
 
 function isBybitCreds(c: ConnectorCredentials): c is BybitCreds {
-  return (
-    typeof c.apiKey === "string" &&
-    typeof c.apiSecret === "string" &&
-    typeof c.accountType === "string" &&
-    ["UNIFIED", "CONTRACT", "SPOT", "FUND"].includes(c.accountType as string)
-  );
+  if (typeof c.apiKey !== "string" || typeof c.apiSecret !== "string") return false;
+  if (typeof c.accountType !== "string" || !VALID_ACCOUNT_TYPES.includes(c.accountType as BybitAccountType)) {
+    return false;
+  }
+  if (c.accountTypes !== undefined) {
+    if (!Array.isArray(c.accountTypes)) return false;
+    if (c.accountTypes.length === 0) return false;
+    for (const t of c.accountTypes) {
+      if (typeof t !== "string" || !VALID_ACCOUNT_TYPES.includes(t as BybitAccountType)) return false;
+    }
+  }
+  return true;
+}
+
+// Resolve the set of account types this credential should fan out across.
+// Always includes the primary `accountType`; merges in any additional ones
+// the user opted into via `accountTypes[]`. Deduped, primary-first ordering.
+function getAccountTypes(creds: BybitCreds): BybitAccountType[] {
+  const out: BybitAccountType[] = [creds.accountType];
+  if (creds.accountTypes) {
+    for (const t of creds.accountTypes) {
+      if (!out.includes(t)) out.push(t);
+    }
+  }
+  return out;
 }
 
 function clientFor(creds: BybitCreds): RestClientV5 {
@@ -96,30 +126,46 @@ export class BybitConnector implements Connector {
     }
     const creds = ctx.credentials;
     const client = clientFor(creds);
+    const types = getAccountTypes(creds);
+    const now = Date.now();
+    const holdings: Holding[] = [];
+    const errors: string[] = [];
 
-    try {
-      const resp = await client.getWalletBalance({ accountType: creds.accountType });
-      if (ctx.signal?.aborted) return err("network_timeout", "Aborted by caller");
-      if (resp.retCode !== 0) {
-        const { kind, message } = mapBybitError(resp.retCode, resp.retMsg);
-        return err(kind, message);
+    // Fan out per accountType. A single API key covers all enabled types,
+    // but Bybit's getWalletBalance requires a separate call per type. Run in
+    // parallel — Bybit V5's per-key rate limit (10 req/sec for /v5/account/*)
+    // easily handles 4 simultaneous calls.
+    const perType = await Promise.all(
+      types.map(async (accountType) => {
+        try {
+          const resp = await client.getWalletBalance({ accountType });
+          return { accountType, resp, err: null as Error | null };
+        } catch (e) {
+          return { accountType, resp: null, err: e as Error };
+        }
+      })
+    );
+    if (ctx.signal?.aborted) return err("network_timeout", "Aborted by caller");
+
+    for (const { accountType, resp, err: thrown } of perType) {
+      if (thrown) {
+        errors.push(`${accountType}: ${thrown.message}`);
+        continue;
       }
-
-      // V5 wallet-balance response shape: { result: { list: [{ accountType, totalEquity, coin: [...] }] } }
-      const list = resp.result?.list ?? [];
-      if (list.length === 0) return ok([]);
-
-      const now = Date.now();
-      const holdings: Holding[] = [];
-
-      for (const account of list) {
+      if (!resp || resp.retCode !== 0) {
+        const { kind, message } = mapBybitError(resp?.retCode ?? -1, resp?.retMsg ?? "no response");
+        // Per-type permission errors are common when the API key only has
+        // certain account types enabled (e.g. read-only on UNIFIED but not
+        // FUND). Tag with the type so the user can see which one needs perms.
+        errors.push(`${accountType} (${kind}): ${message}`);
+        continue;
+      }
+      for (const account of resp.result?.list ?? []) {
         for (const coin of account.coin ?? []) {
           const qty = parseFloat(coin.walletBalance ?? "0");
-          if (qty === 0) continue; // skip dust / zero balance
-
+          if (qty === 0) continue;
           const usdValue = parseFloat(coin.usdValue ?? "0");
           const currentPrice = qty > 0 ? usdValue / qty : undefined;
-
           holdings.push({
             accountId: ctx.account.id,
             symbol: coin.coin,
@@ -138,11 +184,20 @@ export class BybitConnector implements Connector {
           });
         }
       }
-
-      return ok(holdings);
-    } catch (e) {
-      return err("network_error", `Bybit fetchHoldings failed: ${(e as Error).message}`, { cause: e });
     }
+
+    // Partial-success policy mirrors MetaMask: hard error only when EVERY
+    // accountType failed. Otherwise return what we got and surface the
+    // per-type errors via metadata on the first holding.
+    if (holdings.length === 0 && errors.length > 0) {
+      return err("upstream_error", `All Bybit account types failed: ${errors.join("; ")}`);
+    }
+    if (errors.length > 0 && holdings.length > 0) {
+      const first = holdings[0]!;
+      first.metadata = { ...(first.metadata ?? {}), __chainWarnings: errors };
+    }
+
+    return ok(holdings);
   }
 
   async fetchTransactions(
@@ -154,25 +209,45 @@ export class BybitConnector implements Connector {
     }
     const creds = ctx.credentials;
     const client = clientFor(creds);
+    const types = getAccountTypes(creds);
+    const txs: Transaction[] = [];
+    const errors: string[] = [];
 
-    try {
-      // V5 transaction-log: /v5/account/transaction-log
-      // Returns trades, settlements, transfers, fees in one stream.
-      const resp = await client.getTransactionLog({
-        accountType: creds.accountType,
-        startTime: since,
-        limit: 50,
-      });
-      if (ctx.signal?.aborted) return err("network_timeout", "Aborted by caller");
-      if (resp.retCode !== 0) {
-        const { kind, message } = mapBybitError(resp.retCode, resp.retMsg);
-        return err(kind, message);
+    // V5 transaction-log: /v5/account/transaction-log — returns trades,
+    // settlements, transfers, fees in one stream. Note: FUND wallet
+    // transactions are NOT exposed via this endpoint (Bybit limits it to
+    // UNIFIED + CONTRACT). For FUND we'd need /v5/asset/transfer-record
+    // which we'll wire up later if needed; for now FUND silent-skips here
+    // so PnL-from-history stays accurate for trading types only.
+    const txTypes = types.filter((t) => t === "UNIFIED" || t === "CONTRACT");
+
+    const perType = await Promise.all(
+      txTypes.map(async (accountType) => {
+        try {
+          const resp = await client.getTransactionLog({
+            accountType,
+            startTime: since,
+            limit: 50,
+          });
+          return { accountType, resp, err: null as Error | null };
+        } catch (e) {
+          return { accountType, resp: null, err: e as Error };
+        }
+      })
+    );
+    if (ctx.signal?.aborted) return err("network_timeout", "Aborted by caller");
+
+    for (const { accountType, resp, err: thrown } of perType) {
+      if (thrown) {
+        errors.push(`${accountType}: ${thrown.message}`);
+        continue;
       }
-
-      const txs: Transaction[] = [];
+      if (!resp || resp.retCode !== 0) {
+        const { kind, message } = mapBybitError(resp?.retCode ?? -1, resp?.retMsg ?? "no response");
+        errors.push(`${accountType} (${kind}): ${message}`);
+        continue;
+      }
       for (const item of resp.result?.list ?? []) {
-        // Bybit V5 transaction type enum is large (70+ variants). Map the high-signal
-        // ones; anything else falls through to "trade" as a reasonable default.
         const mapped: Transaction["type"] =
           item.type === "TRADE" ? "trade" :
           item.type === "TRANSFER_IN" ? "deposit" :
@@ -184,7 +259,7 @@ export class BybitConnector implements Connector {
 
         txs.push({
           accountId: ctx.account.id,
-          txId: item.transactionTime + ":" + (item.tradeId ?? item.symbol ?? "unknown"),
+          txId: `${accountType}:${item.transactionTime}:${item.tradeId ?? item.symbol ?? "unknown"}`,
           type: mapped,
           symbol: item.symbol,
           quantity: item.qty ? parseFloat(item.qty) : undefined,
@@ -195,16 +270,18 @@ export class BybitConnector implements Connector {
           timestamp: parseInt(item.transactionTime, 10),
           metadata: {
             type: item.type,
+            sourceAccountType: accountType,
             cashFlow: item.cashFlow,
             change: item.change,
             funding: item.funding,
           },
         });
       }
-
-      return ok(txs);
-    } catch (e) {
-      return err("network_error", `Bybit fetchTransactions failed: ${(e as Error).message}`, { cause: e });
     }
+
+    if (txs.length === 0 && errors.length > 0) {
+      return err("upstream_error", `All Bybit account types failed: ${errors.join("; ")}`);
+    }
+    return ok(txs);
   }
 }

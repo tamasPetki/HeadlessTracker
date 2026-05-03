@@ -101,7 +101,7 @@ import {
 } from "./tools/token_admin.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.13.1";
+const SERVER_VERSION = "0.13.2";
 
 // Surfaces in the InitializeResult.instructions field, which Claude Desktop
 // (and most MCP hosts) inject into the system prompt. Cuts wasted tool_search

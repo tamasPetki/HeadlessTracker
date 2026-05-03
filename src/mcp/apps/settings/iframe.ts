@@ -146,7 +146,10 @@ function describeMetadata(connectorId: string, meta: Record<string, unknown>): s
     return `${addrs.length} address${addrs.length === 1 ? "" : "es"}, ${chains.length} chain${chains.length === 1 ? "" : "s"}`;
   }
   if (connectorId === "bybit") {
-    return `${meta.accountType ?? "?"} account`;
+    const types = Array.isArray(meta.accountTypes) && meta.accountTypes.length > 0
+      ? (meta.accountTypes as string[]).join("+")
+      : (meta.accountType as string ?? "?");
+    return `${types} account`;
   }
   if (connectorId === "binance") {
     const fp = typeof meta.keyFingerprint === "string" ? meta.keyFingerprint : "?";
@@ -203,23 +206,37 @@ function renderConnectorForm(connector: string): void {
       <form id="form-bybit" class="form-grid">
         <label>API Key<input name="apiKey" type="text" required autocomplete="off"></label>
         <label>API Secret<input name="apiSecret" type="password" required autocomplete="off"></label>
-        <label>Account type<select name="accountType">
+        <label>Primary account type<select name="accountType">
           <option value="UNIFIED" selected>UNIFIED (recommended for most accounts)</option>
           <option value="CONTRACT">CONTRACT (legacy perp/futures)</option>
           <option value="SPOT">SPOT (legacy spot)</option>
           <option value="FUND">FUND (funding wallet)</option>
         </select></label>
+        <fieldset>
+          <legend>Also track these (same API key covers them all)</legend>
+          <label class="inline"><input type="checkbox" name="extra" value="FUND" checked>FUND (funding wallet — deposits, transfers, USDT parking)</label>
+          <label class="inline"><input type="checkbox" name="extra" value="CONTRACT">CONTRACT (legacy perp/futures sub-account)</label>
+          <label class="inline"><input type="checkbox" name="extra" value="SPOT">SPOT (legacy spot sub-account)</label>
+          <small class="muted">Most users want UNIFIED + FUND so funding-wallet balances aren't invisible. Skip a checkbox if your key doesn't have permission for that type.</small>
+        </fieldset>
         <button type="submit" class="btn-primary">Validate &amp; Save</button>
       </form>
       <div id="form-result"></div>`;
-    wireForm("form-bybit", async (data) => callTool("setup_connector", {
-      connector: "bybit",
-      bybit: {
-        apiKey: data.apiKey,
-        apiSecret: data.apiSecret,
-        accountType: data.accountType as "UNIFIED" | "CONTRACT" | "SPOT" | "FUND",
-      },
-    }));
+    wireForm("form-bybit", async (data) => {
+      const form = document.getElementById("form-bybit") as HTMLFormElement;
+      const extras = Array.from(form.querySelectorAll<HTMLInputElement>("input[name=extra]:checked"))
+        .map((cb) => cb.value)
+        .filter((v) => v !== data.accountType);  // primary already counted; don't list it twice
+      return callTool("setup_connector", {
+        connector: "bybit",
+        bybit: {
+          apiKey: data.apiKey,
+          apiSecret: data.apiSecret,
+          accountType: data.accountType as "UNIFIED" | "CONTRACT" | "SPOT" | "FUND",
+          accountTypes: extras.length > 0 ? extras as Array<"UNIFIED" | "CONTRACT" | "SPOT" | "FUND"> : undefined,
+        },
+      });
+    });
     return;
   }
   if (connector === "binance") {

@@ -59,4 +59,46 @@ describe("BybitConnector.validateCredentials shape check", () => {
     expect(c.defaultCacheTtlSec).toBe(120);
     expect(c.displayName).toContain("Bybit");
   });
+
+  test("rejects credentials with invalid accountTypes element", async () => {
+    const c = new BybitConnector();
+    const result = await c.validateCredentials({
+      apiKey: "k",
+      apiSecret: "s",
+      accountType: "UNIFIED",
+      accountTypes: ["FUND", "GHOST"],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.kind).toBe("schema_mismatch");
+    }
+  });
+
+  test("rejects empty accountTypes array (must be omitted or non-empty)", async () => {
+    const c = new BybitConnector();
+    const result = await c.validateCredentials({
+      apiKey: "k",
+      apiSecret: "s",
+      accountType: "UNIFIED",
+      accountTypes: [],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.kind).toBe("schema_mismatch");
+    }
+  });
+
+  test("rejects accountTypes that's not an array", async () => {
+    const c = new BybitConnector();
+    const result = await c.validateCredentials({
+      apiKey: "k",
+      apiSecret: "s",
+      accountType: "UNIFIED",
+      accountTypes: "FUND",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.kind).toBe("schema_mismatch");
+    }
+  });
 });

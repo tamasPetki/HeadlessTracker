@@ -2,6 +2,38 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.13.2 — 2026-05-03
+
+User reported: configured `bybit:UNIFIED` shows trading wallet but FUND wallet (funding/USDT parking) is invisible. Existing model required setting up Bybit twice — once per accountType — which is poor UX and rarely discovered. v0.13.2 lets a single Bybit account fan out across multiple account types using the same API key.
+
+### Added
+
+- **`BybitCreds.accountTypes?: BybitAccountType[]`** (optional, additive): when present, `fetchHoldings` and `fetchTransactions` fan out across the listed types in addition to the primary `accountType`. Common pattern: track UNIFIED + FUND together so funding-wallet balances aren't hidden.
+- **`BybitConnector.fetchHoldings`**: parallel-`Promise.all` per resolved accountType (Bybit's per-key 10 req/sec rate limit comfortably handles 4 simultaneous calls). Per-type results merged into a single `Holding[]`. Each holding tags `metadata.accountType` (already happening), so the dashboard's `by=account` allocation breakdown still discriminates UNIFIED vs FUND vs SPOT correctly.
+- **Partial-success policy** (mirrors MetaMask multi-chain): hard error only when EVERY account type fails. Otherwise per-type errors surface via `__chainWarnings` on the first holding's metadata so the user sees which types had permission/rate issues without losing the data we did fetch.
+- **`fetchTransactions`**: also fans out, but only across UNIFIED + CONTRACT (Bybit's `/v5/account/transaction-log` is limited to those — FUND wallet transactions live behind `/v5/asset/transfer-record` which we'll wire up in a later release if asked). FUND-only setups silent-skip transactions, holdings still work.
+- **CLI `setup bybit`**: after picking the primary type, prompts for each of the other 3 types ("Also track FUND? (y/N)" etc.). Defaults still UNIFIED-only, but the prompts make multi-type setup discoverable.
+- **Settings GUI Bybit form**: replaces the single dropdown with a primary-type selector + 3 checkboxes (FUND default-checked because that's the most common addition). Hint text under the checkboxes explains the pattern.
+
+### Changed
+
+- **`BybitConnector.fetchHoldings` is now multi-type by default semantics**: callers that pass `creds.accountType: "UNIFIED"` without `accountTypes` still get exactly one type queried (full back-compat with v0.7-v0.13 behavior). `accountTypes` is purely additive.
+- **Account ID still derives from the primary type** (`bybit:UNIFIED`), so existing v0.7+ vault entries round-trip cleanly. Adding FUND tracking to an existing UNIFIED account does NOT change the account ID.
+- **Account label** now reflects the fan-out: `Bybit UNIFIED+FUND` instead of just `Bybit UNIFIED` when extras are set. Settings UI's Accounts tab shows `UNIFIED+FUND account` in the metadata summary.
+- **`setup_connector` tool description** explicitly documents the `accountTypes` field with an example (`['FUND'] alongside UNIFIED`).
+- `SERVER_VERSION` 0.13.1 → 0.13.2; `package.json` bump.
+
+### Migration
+
+Existing Bybit users keeping UNIFIED-only see no change. To add FUND tracking:
+- **CLI**: re-run `bun run setup bybit` and answer "y" to "Also track FUND?". Vault entry overwrites with the new `accountTypes: ["FUND"]` field; account ID stays `bybit:UNIFIED`.
+- **Settings UI**: open the Settings panel → Accounts → Remove the Bybit account → Add Account → Bybit, this time with FUND checkbox ticked. (We'll add an "edit accountTypes" tool in a later release if asked; for now, remove + re-add is the path.)
+
+### Tests
+
+- 3 new schema-validation tests in `test/connectors/bybit.test.ts`: rejects invalid `accountTypes` element, rejects empty array (must be omitted), rejects non-array shape. Total: 317 tests pass (was 314).
+- The fan-out integration path is exercised in the manual Bybit smoke test rather than a mocked-SDK unit test (consistent with how the existing fetchHoldings happy-path is covered — the `bybit-api` SDK class hierarchy is high-effort to mock cleanly for marginal coverage).
+
 ## v0.13.1 — 2026-05-03
 
 User reported: 13 mainstream coins (solana, ripple, binancecoin, near, sui, hyperliquid, jupiter, etc.) all skipped with `historical price unavailable for 7d ago` in the windowDelta block. Root cause was CoinGecko rate-limiting on the `/coins/{id}/history` endpoint under parallel fan-out.
