@@ -133,15 +133,19 @@ class McpClient {
 
 let client: McpClient;
 
+// Captured during the initial handshake so individual tests can assert on
+// the InitializeResult shape (serverInfo, capabilities, instructions).
+let initResult: JsonRpcResponse;
+
 beforeAll(async () => {
   client = new McpClient();
   // Initialize handshake
-  const init = await client.send("initialize", {
+  initResult = await client.send("initialize", {
     protocolVersion: "2025-03-26",
     capabilities: {},
     clientInfo: { name: "e2e-test", version: "1" },
   });
-  expect(init.error).toBeUndefined();
+  expect(initResult.error).toBeUndefined();
   await client.notify("notifications/initialized");
 });
 
@@ -158,6 +162,39 @@ describe("E2E: MCP stdio server", () => {
     // Already done in beforeAll; re-issuing produces a second handshake which
     // the server tolerates. We just verify the handshake produced no error.
     expect(client).toBeDefined();
+  });
+
+  test("initialize advertises capabilities (tools, prompts, resources)", () => {
+    const result = initResult.result as {
+      capabilities: { tools?: object; prompts?: object; resources?: object };
+    };
+    expect(result.capabilities.tools).toBeDefined();
+    expect(result.capabilities.prompts).toBeDefined();
+    expect(result.capabilities.resources).toBeDefined();
+  });
+
+  test("initialize includes instructions for the host system prompt", () => {
+    // The server populates InitializeResult.instructions so MCP hosts can
+    // inject routing hints into the LLM system prompt — cuts wasted
+    // tool_search roundtrips on lazy-loading hosts (Claude Desktop /
+    // ChatGPT). Test that the field is present, sized reasonably, and
+    // mentions the actual tool names so the host system-prompt
+    // injection actually helps.
+    const result = initResult.result as { instructions?: string };
+    expect(typeof result.instructions).toBe("string");
+    expect(result.instructions!.length).toBeGreaterThan(200);
+    expect(result.instructions!.length).toBeLessThan(4000);
+    // Must reference each tool by name so the model can route directly.
+    expect(result.instructions).toContain("get_holdings");
+    expect(result.instructions).toContain("get_pnl");
+    expect(result.instructions).toContain("get_polymarket_positions");
+    expect(result.instructions).toContain("get_transactions");
+    expect(result.instructions).toContain("get_allocations");
+    expect(result.instructions).toContain("refresh_data");
+    expect(result.instructions).toContain("render_dashboard");
+    // Must mention honesty rules so the LLM doesn't fabricate $0 for null.
+    expect(result.instructions!.toLowerCase()).toContain("null");
+    expect(result.instructions!.toLowerCase()).toContain("windowdelta");
   });
 
   test("tools/list returns the V0 data tools + render_dashboard MCP App", async () => {

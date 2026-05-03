@@ -2,6 +2,39 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.10.4 — 2026-05-03
+
+User feedback: on the first turn of a session, Claude Desktop showed two warmup tool calls before the actual `get_holdings`. The first attempt failed with "tool has not been loaded yet — call tool_search first to discover parameters." Then a `tool_search` round-trip loaded the schemas, and only then could `get_holdings` succeed. This is Claude Desktop's lazy schema-loading on a server with many tools — a real protocol cost.
+
+### Added
+
+- **`SERVER_INSTRUCTIONS` field** populated on the `McpServer` constructor (`ServerOptions.instructions`). The MCP spec says the host MAY inject this string into the LLM system prompt — Claude Desktop and most modern hosts do. Now the model sees a routing summary on every session start without needing to call `tool_search` first.
+- The instructions string (~1.6KB) covers:
+  - Tool inventory mapped to user intent ("what do I own" → `get_holdings`, etc.) for all 7 tools.
+  - Honesty rules: `realizedPnl: null` is unknown not zero, `windowDelta` is approximate, `skippedSymbols` should be surfaced, `failures[]` should be shown.
+  - Fan-out hint: parallelize multi-tool questions in one round-trip (in-flight Promise dedup absorbs duplicate cache hits).
+  - Currency support: storage is USD-equivalent, `currency=` arg switches display, `fx.source` warns on fallback.
+
+### Changed
+
+- `SERVER_VERSION` constant 0.10.3 → 0.10.4; `package.json` bump.
+
+### Tests
+
+- 2 new E2E assertions in `test/e2e/mcp-stdio.test.ts`:
+  1. `initialize` advertises capabilities for tools, prompts, AND resources.
+  2. `initialize` includes an `instructions` string of reasonable size (200-4000 chars), referencing every tool by name AND the honesty rules ("null", "windowDelta").
+- The existing `initResult` was hoisted to module scope so multiple tests can assert on the same handshake response.
+- 241 → 243 tests, typecheck clean.
+
+### What this changes for the user
+
+Per-session: in Claude Desktop, the first turn no longer wastes a "tool not loaded" round-trip + a `tool_search` discovery hop. The model already has enough routing context from the system-prompt-injected instructions to call the right tool directly. Claude on lazy-load hosts effectively gets a "cheat sheet" before the conversation starts.
+
+### Forward note
+
+If hosts evolve to support richer initialization metadata (e.g. tool-specific examples, or per-tool routing hints in `_meta`), we'd port relevant parts there too. For now `instructions` is the canonical channel.
+
 ## v0.10.3 — 2026-05-03
 
 User feedback from the dashboard: a real Bybit portfolio (HYPE, JUP, ENA, DEEP, PUMP, SPEC, MON, VVV, ...) showed "5 priced, 8 skipped" on the Weekly tab — most holdings missing from the static `COINGECKO_IDS` map and `windowDelta` excluding them. The static map was capped at ~28 majors; everything else fell off a cliff.
