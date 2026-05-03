@@ -197,19 +197,27 @@ describe("E2E: MCP stdio server", () => {
     expect(result.instructions!.toLowerCase()).toContain("windowdelta");
   });
 
-  test("tools/list returns the V0 data tools + render_dashboard MCP App", async () => {
+  test("tools/list returns the V0 data tools + render_dashboard + Settings admin tools", async () => {
     const resp = await client.send("tools/list");
     expect(resp.error).toBeUndefined();
     const tools = (resp.result as ToolListResult).tools;
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "add_custom_token",
+      "add_wallet_address",
       "get_allocations",
       "get_holdings",
       "get_pnl",
       "get_polymarket_positions",
       "get_transactions",
+      "list_accounts",
+      "list_custom_tokens",
       "refresh_data",
+      "remove_account",
+      "remove_custom_token",
       "render_dashboard",
+      "render_settings",
+      "setup_connector",
     ]);
   });
 

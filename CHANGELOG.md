@@ -2,6 +2,55 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.11.0 — 2026-05-03
+
+The big UX leap: **a full Settings MCP App** for setup + admin, completely replacing the need to drop into a terminal for connecting/managing accounts. User can ask "open settings" and get a live 4-tab UI panel inside Claude Desktop.
+
+### Added
+
+- **7 new MCP tools** behind the Settings UI (also callable directly by the LLM):
+  - `list_accounts` — read-only listing of configured accounts. Strips credentials. Optional `connector` filter.
+  - `setup_connector` — creates a new account by writing READ-ONLY credentials to the OS keychain. Mirror of the CLI setup flow. Validates against the upstream API before persisting. Discriminated union of `bybit | metamask | polymarket` credentials.
+  - `add_wallet_address` — appends an address to an existing MetaMask account's `addresses[]` list. Auto-migrates legacy single-`address` form. Public on-chain identifier; no new secrets.
+  - `remove_account` — deletes from AccountStore + keychain. One-way; Settings UI requires explicit confirm dialog before firing.
+  - `add_custom_token` — wraps the existing `addCustomToken` from `src/tokens.ts`. Public on-chain data; no keychain.
+  - `remove_custom_token` — wraps `removeCustomToken`.
+  - `list_custom_tokens` — wraps `listCustomTokens`. Optional `account_id` filter.
+- **Settings MCP App** (`render_settings` tool, linked to `ui://headless-tracker/settings`) with four tabs:
+  - **Accounts**: read-only list with metadata summary (chains/addresses for MetaMask, account-type for Bybit, proxy short for Polymarket) + Remove button (browser `confirm()` dialog).
+  - **Add Account**: connector selector → form per type. Bybit form has API key/secret/account-type. MetaMask form has address, Etherscan key, 6-checkbox chain picker (★ free / $ Pro tier marked), trackCommonTokens + hasEtherscanPro toggles. Polymarket form has just proxy wallet + size threshold. **Yellow-highlighted security disclosure banner** at the top of every form: credentials transit Claude Desktop process → keychain, all three connectors are read-only by design (worst-case leak = portfolio read, never fund movement), CLI path remains for zero-trust.
+  - **Wallets**: select an existing MetaMask account from a dropdown, add a new address. Live table below shows tracked addresses per account.
+  - **Custom Tokens**: list (with Remove button) + add form (account selector + chain dropdown + contract + symbol + decimals). Re-fetches on add/remove for live update.
+- **Build script extension** (`scripts/build-mcp-apps.ts`) — now bundles BOTH `dashboard` and `settings` iframes via the same Bun.build pipeline. Output: `dist/mcp-apps/dashboard.html` (~403KB) + `dist/mcp-apps/settings.html` (~407KB). Both shipped with the package.
+- **`SERVER_INSTRUCTIONS` updated** with routing hints for the new tools and a CREDENTIAL HANDLING section: "NEVER echo, log, paraphrase, or repeat any apiKey / apiSecret / etherscanApiKey value back to the user. After successful setup_connector, confirm only the account label and id."
+
+### Changed
+
+- `SERVER_VERSION` 0.10.5 → 0.11.0; `package.json` bump.
+- `StubVault` in `test/helpers/stub-connector.ts` now properly implements `Vault` interface (async `set` returning `Promise<Result<void>>`). Existing tests unaffected; new tests can `await vault.set(...)`.
+- README hoists a new "Settings panel (live UI for setup + admin)" section right after the Interactive dashboard section, with the explicit security trust-path explanation.
+
+### Tests
+
+- 16 new tests in `test/mcp/tools/admin_tools.test.ts`: `list_accounts` (empty / filtered / no-credential-leak), `setup_connector` Polymarket happy path + missing-creds + invalid-wallet, `add_wallet_address` (unknown account / non-metamask reject / append + legacy migration / duplicate detection), `remove_account` (unknown / store + vault delete), and the custom-token round-trip with non-metamask + invalid-chain rejection.
+- 10 new tests in `test/mcp/apps/settings.test.ts`: tool name pinning, URI scheme, four-tab description coverage, behavior-contract assertion (description mentions transcripts + credentials), server-construction smoke, bundle existence + structure + size guard + security-disclosure copy assertion.
+- E2E `tools/list` assertion expanded from 7 to 15 tools.
+- One existing tool description (`remove_custom_token`) expanded to clear the >200-char descriptions threshold the E2E test enforces for LLM tool-selection accuracy.
+- 248 → 274 tests, typecheck clean.
+
+### Why we went with B (forms in iframe) instead of C (loopback localhost browser)
+
+- All three connectors use READ-ONLY credentials by spec (Bybit Read+Trade-Read, no Withdraw; Etherscan rate-limit token for public data; Polymarket proxy wallet is already public). Worst-case leak is portfolio-read, never fund movement. Risk profile is much smaller than typical "API key" intuition implies.
+- The host process (Claude Desktop) seeing the postMessage is a much narrower trust path than naive intuition — Claude the LLM doesn't get the payload as conversation context.
+- Loopback localhost browser (~1-2 days extra eng) didn't justify the cost given the risk profile.
+- CLI stays the zero-trust path for users who want it.
+
+### What this changes for the user
+
+Previously: setup required dropping into a terminal for each connector. Multi-wallet add required editing a vault entry directly.
+
+Now: ask Claude "open settings", click through the form, done. Same writes to the same SQLite + keychain — accounts created via either path show up everywhere immediately.
+
 ## v0.10.5 — 2026-05-03
 
 User-spotted bugs from a HUF dashboard screenshot:

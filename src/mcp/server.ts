@@ -62,9 +62,46 @@ import {
   buildRiskCheckPrompt,
 } from "./prompts/risk_check.ts";
 import { registerDashboardApp } from "./apps/dashboard/register.ts";
+import { registerSettingsApp } from "./apps/settings/register.ts";
+import {
+  LIST_ACCOUNTS_TOOL_NAME,
+  LIST_ACCOUNTS_DESCRIPTION,
+  LIST_ACCOUNTS_INPUT_SCHEMA,
+  executeListAccounts,
+} from "./tools/list_accounts.ts";
+import {
+  SETUP_CONNECTOR_TOOL_NAME,
+  SETUP_CONNECTOR_DESCRIPTION,
+  SETUP_CONNECTOR_INPUT_SCHEMA,
+  executeSetupConnector,
+} from "./tools/setup_connector.ts";
+import {
+  ADD_WALLET_ADDRESS_TOOL_NAME,
+  ADD_WALLET_ADDRESS_DESCRIPTION,
+  ADD_WALLET_ADDRESS_INPUT_SCHEMA,
+  executeAddWalletAddress,
+  REMOVE_ACCOUNT_TOOL_NAME,
+  REMOVE_ACCOUNT_DESCRIPTION,
+  REMOVE_ACCOUNT_INPUT_SCHEMA,
+  executeRemoveAccount,
+} from "./tools/account_admin.ts";
+import {
+  ADD_CUSTOM_TOKEN_TOOL_NAME,
+  ADD_CUSTOM_TOKEN_DESCRIPTION,
+  ADD_CUSTOM_TOKEN_INPUT_SCHEMA,
+  executeAddCustomToken,
+  REMOVE_CUSTOM_TOKEN_TOOL_NAME,
+  REMOVE_CUSTOM_TOKEN_DESCRIPTION,
+  REMOVE_CUSTOM_TOKEN_INPUT_SCHEMA,
+  executeRemoveCustomToken,
+  LIST_CUSTOM_TOKENS_TOOL_NAME,
+  LIST_CUSTOM_TOKENS_DESCRIPTION,
+  LIST_CUSTOM_TOKENS_INPUT_SCHEMA,
+  executeListCustomTokens,
+} from "./tools/token_admin.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.10.5";
+const SERVER_VERSION = "0.11.0";
 
 // Surfaces in the InitializeResult.instructions field, which Claude Desktop
 // (and most MCP hosts) inject into the system prompt. Cuts wasted tool_search
@@ -90,8 +127,13 @@ WHAT YOU CAN ANSWER WITHOUT EXTRA TOOL DISCOVERY (call the named tool directly):
 - "how is my portfolio split" / "biggest positions" / "allocation" → get_allocations (by=asset_class|connector|account|chain|symbol)
 - "refresh" / "fetch fresh data" → refresh_data (rarely needed; per-connector cache TTL is 30s-120s and fan-out auto-refreshes)
 - "show my dashboard" / "render dashboard" / "open dashboard" → render_dashboard (MCP App; renders a live interactive 3-tab panel — Portfolio / Weekly / Risk — when the host supports MCP Apps)
+- "set up an account" / "add Bybit" / "connect MetaMask" / "remove this connection" / "show my accounts" / "add a custom token" / "track another wallet" → render_settings (MCP App; live Settings panel with Accounts / Add Account / Wallets / Custom Tokens tabs)
+- "list my accounts" → list_accounts (read-only, no UI; for inline answers)
+- The Settings UI is preferred for credential entry — keeps secrets out of the chat transcript. If the user pastes credentials inline, point them at render_settings rather than calling setup_connector with the inline values.
 
 PARALLELIZE: when the user wants a complete picture, call multiple data tools in ONE round-trip (in-flight Promise dedup deduplicates repeated calls per cache key; no penalty for overlap). The portfolio-dashboard / weekly-review / risk-check preset prompts demonstrate the canonical fan-outs.
+
+CREDENTIAL HANDLING: NEVER echo, log, paraphrase, or repeat any apiKey / apiSecret / etherscanApiKey value back to the user. After a successful setup_connector call, confirm only the account label and id, not the secrets.
 
 HONESTY RULES (do NOT fabricate around these):
 - realizedPnl: null means cost basis is unknown — NOT zero. Don't report it as $0; explain the gap.
@@ -196,11 +238,89 @@ export function createMcpServer(): McpServer {
   server.registerPrompt(WEEKLY_REVIEW_PROMPT_NAME, WEEKLY_REVIEW_PROMPT_CONFIG, () => buildWeeklyReviewPrompt());
   server.registerPrompt(RISK_CHECK_PROMPT_NAME, RISK_CHECK_PROMPT_CONFIG, () => buildRiskCheckPrompt());
 
+  // Account / setup admin tools. Backing for the Settings MCP App's tabs +
+  // available standalone for the LLM when the user asks "what accounts are
+  // configured", "add a Bybit account", etc.
+  server.tool(
+    LIST_ACCOUNTS_TOOL_NAME,
+    LIST_ACCOUNTS_DESCRIPTION,
+    LIST_ACCOUNTS_INPUT_SCHEMA,
+    async (args) => {
+      const result = executeListAccounts(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    SETUP_CONNECTOR_TOOL_NAME,
+    SETUP_CONNECTOR_DESCRIPTION,
+    SETUP_CONNECTOR_INPUT_SCHEMA,
+    async (args) => {
+      const result = await executeSetupConnector(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    ADD_WALLET_ADDRESS_TOOL_NAME,
+    ADD_WALLET_ADDRESS_DESCRIPTION,
+    ADD_WALLET_ADDRESS_INPUT_SCHEMA,
+    async (args) => {
+      const result = await executeAddWalletAddress(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    REMOVE_ACCOUNT_TOOL_NAME,
+    REMOVE_ACCOUNT_DESCRIPTION,
+    REMOVE_ACCOUNT_INPUT_SCHEMA,
+    async (args) => {
+      const result = await executeRemoveAccount(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    ADD_CUSTOM_TOKEN_TOOL_NAME,
+    ADD_CUSTOM_TOKEN_DESCRIPTION,
+    ADD_CUSTOM_TOKEN_INPUT_SCHEMA,
+    async (args) => {
+      const result = executeAddCustomToken(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    REMOVE_CUSTOM_TOKEN_TOOL_NAME,
+    REMOVE_CUSTOM_TOKEN_DESCRIPTION,
+    REMOVE_CUSTOM_TOKEN_INPUT_SCHEMA,
+    async (args) => {
+      const result = executeRemoveCustomToken(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    LIST_CUSTOM_TOKENS_TOOL_NAME,
+    LIST_CUSTOM_TOKENS_DESCRIPTION,
+    LIST_CUSTOM_TOKENS_INPUT_SCHEMA,
+    async (args) => {
+      const result = executeListCustomTokens(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
   // Interactive dashboard MCP App — registers `render_dashboard` tool +
   // bundled UI resource. Hosts that support the io.modelcontextprotocol/ui
   // extension (Claude Desktop, Goose, ChatGPT, VS Code, etc.) render the
   // tool's output as a sandboxed iframe with live tabs and refresh.
   registerDashboardApp(server);
+
+  // Settings MCP App — `render_settings` tool with 4 tabs (Accounts / Add /
+  // Wallets / Custom Tokens). GUI alternative to the CLI setup flow with an
+  // explicit security disclosure surfacing the credential trust path.
+  registerSettingsApp(server);
 
   return server;
 }

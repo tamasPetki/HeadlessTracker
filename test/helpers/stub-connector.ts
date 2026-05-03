@@ -62,11 +62,18 @@ export class StubConnector implements Connector {
 }
 
 // Stub vault that just returns whatever credentials were registered for an account.
+// Conforms to the real Vault interface (Promise<Result<...>> on set/get/remove)
+// so production code calling `await vault.set(...)` doesn't blow up under stub.
 export class StubVault {
   private store = new Map<string, ConnectorCredentials>();
 
-  set(connectorId: ConnectorId, accountIdentifier: string, creds: ConnectorCredentials): void {
+  async set(
+    connectorId: ConnectorId,
+    accountIdentifier: string,
+    creds: ConnectorCredentials
+  ): Promise<Result<void>> {
     this.store.set(`${connectorId}:${accountIdentifier}`, creds);
+    return ok(undefined);
   }
 
   async get(connectorId: ConnectorId, accountIdentifier: string): Promise<Result<ConnectorCredentials>> {
@@ -76,7 +83,6 @@ export class StubVault {
     return ok(creds);
   }
 
-  // The real Vault interface needs these but tests rarely invoke them.
   async remove(connectorId: ConnectorId, accountIdentifier: string): Promise<Result<void>> {
     this.store.delete(`${connectorId}:${accountIdentifier}`);
     return ok(undefined);

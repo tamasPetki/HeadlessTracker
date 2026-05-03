@@ -1,0 +1,61 @@
+// Tool: list_accounts
+// Read-only listing of configured accounts. Surfaces what was set up via the
+// CLI / Settings UI. NEVER returns credentials — those live in the OS keychain
+// and aren't accessed from this path.
+//
+// Used by the Settings MCP App's Accounts tab (iframe makes a tool call), and
+// available to the LLM for "what's configured" questions.
+
+import { z } from "zod";
+
+import { defaultAccountStore, type AccountStore } from "../../accounts.ts";
+
+export const LIST_ACCOUNTS_TOOL_NAME = "list_accounts";
+
+export const LIST_ACCOUNTS_DESCRIPTION = [
+  "Lists all configured accounts (Bybit, MetaMask, Polymarket) without exposing credentials.",
+  "Use when the user asks: 'what accounts are configured', 'show my accounts', 'list connections', 'which exchanges are linked'.",
+  "Returns: id, connectorId, label, createdAt, and connector-specific public metadata (e.g. chainIds and addresses for MetaMask, accountType for Bybit).",
+  "Credentials are NEVER returned — they stay in the OS keychain.",
+].join(" ");
+
+export const LIST_ACCOUNTS_INPUT_SCHEMA = {
+  connector: z.enum(["bybit", "metamask", "polymarket"]).optional(),
+};
+
+export interface ListAccountsArgs {
+  connector?: "bybit" | "metamask" | "polymarket";
+}
+
+export interface ListedAccount {
+  id: string;
+  connectorId: string;
+  label: string;
+  createdAt: string;            // ISO 8601
+  metadata: Record<string, unknown>;
+}
+
+export interface ListAccountsResult {
+  accounts: ListedAccount[];
+  meta: { total: number; asOf: string };
+}
+
+export function executeListAccounts(
+  args: ListAccountsArgs,
+  store: AccountStore = defaultAccountStore()
+): ListAccountsResult {
+  const accounts = args.connector ? store.listByConnector(args.connector) : store.list();
+  return {
+    accounts: accounts.map((a) => ({
+      id: a.id,
+      connectorId: a.connectorId,
+      label: a.label,
+      createdAt: new Date(a.createdAt).toISOString(),
+      metadata: a.metadata ?? {},
+    })),
+    meta: {
+      total: accounts.length,
+      asOf: new Date().toISOString(),
+    },
+  };
+}

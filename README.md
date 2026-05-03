@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.10.5. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 7 MCP tools (6 data + `render_dashboard` MCP App), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 248-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** v0.11.0. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 7 MCP tools (6 data + `render_dashboard` MCP App), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 274-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -36,6 +36,21 @@ Plus a currency switcher (USD / EUR / GBP / HUF) and a refresh button. The ifram
 Implementation: `src/mcp/apps/dashboard/` (browser-side TS bundled into a single `dist/mcp-apps/dashboard.html` via `bun run build:apps`, ships with the package). The bundled artifact is committed so users running `bunx headless-tracker` don't need a build step.
 
 If your host doesn't render MCP Apps yet, the `render_dashboard` tool still returns a textual confirmation. Use the [prompt cookbook](#prompt-cookbook) below as a fallback — same workflows, same data, just no live UI panel.
+
+## Settings panel (live UI for setup + admin)
+
+For setup that doesn't drop you into a terminal, ask:
+
+> Open settings
+
+The Settings MCP App opens with four tabs:
+
+- **Accounts** — list of configured accounts with a Remove button (one-way confirm dialog; deletes from both the OS keychain and the registry).
+- **Add Account** — forms for Bybit / MetaMask / Polymarket. Each form validates against the upstream API before persisting credentials. Explicit security disclosure at the top: credentials submitted via the form transit Claude Desktop's process en route to the keychain. **All three connectors use READ-ONLY credentials by design** (Bybit "Read" only, no Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public). Worst-case leak = portfolio-read, never fund movement. For zero-trust, the CLI flow (`bun run setup <connector>`) stays available.
+- **Wallets** — add an additional wallet address to an existing MetaMask account (multi-wallet under one MCP account, sharing the same Etherscan key + chain selection).
+- **Custom Tokens** — list / add / remove ERC-20 tokens per chain. Token data is public on-chain; no keychain involvement.
+
+Either path (CLI or Settings UI) writes to the same `~/.headless-tracker/cache.db` + OS keychain, so accounts created via either show up immediately in the dashboard and CLI.
 
 ## Quick start
 
@@ -278,7 +293,7 @@ The point of headless-tracker is that you don't write SQL or learn a CLI — you
 
 ```bash
 bun install
-bun test                              # 248 tests, ~15s
+bun test                              # 274 tests, ~15s
 bun run typecheck                     # bun --bun tsc --noEmit
 bun run build:apps                    # bundle the dashboard MCP App into dist/mcp-apps/
 bun run start                         # start MCP server on stdio (debug only)
