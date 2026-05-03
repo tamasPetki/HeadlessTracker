@@ -101,7 +101,7 @@ import {
 } from "./tools/token_admin.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.11.1";
+const SERVER_VERSION = "0.12.0";
 
 // Surfaces in the InitializeResult.instructions field, which Claude Desktop
 // (and most MCP hosts) inject into the system prompt. Cuts wasted tool_search
@@ -112,7 +112,7 @@ const SERVER_VERSION = "0.11.1";
 // Aim: under 2KB. Sectioned for skimmability. Don't repeat each tool's full
 // description (those load on demand) — just the routing hints + caveats the
 // model can't infer from the schema alone.
-const SERVER_INSTRUCTIONS = `headless-tracker is a local-first PORTFOLIO TRACKER for crypto holdings, prediction markets, and on-chain wallets (Bybit exchange + MetaMask multi-chain + Polymarket). All tools and apps in this server are scoped to that domain.
+const SERVER_INSTRUCTIONS = `headless-tracker is a local-first PORTFOLIO TRACKER for crypto holdings, prediction markets, and on-chain wallets (Bybit exchange + MetaMask multi-chain + Polymarket + Solana wallets). All tools and apps in this server are scoped to that domain.
 
 DOMAIN ANCHOR (avoid cross-server confusion): if the user's request is about anything OTHER than crypto/wallet/portfolio/exchange data — Vercel deployments, Sentry errors, Grafana metrics, GitHub activity, browser settings, app settings, OS preferences, email accounts, social accounts — DO NOT call headless-tracker tools. Defer to the appropriate MCP server. When the user says generic things like 'open dashboard' or 'open settings' WITHOUT context implying portfolio, ask for clarification before invoking render_dashboard / render_settings.
 
@@ -129,7 +129,7 @@ WHAT YOU CAN ANSWER WITHOUT EXTRA TOOL DISCOVERY (call the named tool directly):
 - "how is my portfolio split" / "biggest positions" / "allocation" → get_allocations (by=asset_class|connector|account|chain|symbol)
 - "refresh" / "fetch fresh data" → refresh_data (rarely needed; per-connector cache TTL is 30s-120s and fan-out auto-refreshes)
 - "show my dashboard" / "render dashboard" / "open dashboard" → render_dashboard (MCP App; renders a live interactive 3-tab panel — Portfolio / Weekly / Risk — when the host supports MCP Apps)
-- "set up an account" / "add Bybit" / "connect MetaMask" / "remove this connection" / "show my accounts" / "add a custom token" / "track another wallet" → render_settings (MCP App; live Settings panel with Accounts / Add Account / Wallets / Custom Tokens tabs)
+- "set up an account" / "add Bybit" / "connect MetaMask" / "connect Solana" / "remove this connection" / "show my accounts" / "add a custom token" / "track another wallet" → render_settings (MCP App; live Settings panel with Accounts / Add Account / Wallets / Custom Tokens tabs)
 - "list my accounts" → list_accounts (read-only, no UI; for inline answers)
 - The Settings UI is preferred for credential entry — keeps secrets out of the chat transcript. If the user pastes credentials inline, point them at render_settings rather than calling setup_connector with the inline values.
 

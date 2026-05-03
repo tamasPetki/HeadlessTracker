@@ -4,7 +4,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v0.11.1. 3 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket), 7 MCP tools (6 data + `render_dashboard` MCP App), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 274-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** v0.12.0. 4 connectors (Bybit, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet), 7 MCP tools (6 data + `render_dashboard` MCP App), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), live Settings MCP App for setup/admin, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko + Jupiter Price spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 291-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -46,8 +46,8 @@ For setup that doesn't drop you into a terminal, ask:
 The Settings MCP App opens with four tabs:
 
 - **Accounts** — list of configured accounts with a Remove button (one-way confirm dialog; deletes from both the OS keychain and the registry).
-- **Add Account** — forms for Bybit / MetaMask / Polymarket. Each form validates against the upstream API before persisting credentials. Explicit security disclosure at the top: credentials submitted via the form transit Claude Desktop's process en route to the keychain. **All three connectors use READ-ONLY credentials by design** (Bybit "Read" only, no Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public). Worst-case leak = portfolio-read, never fund movement. For zero-trust, the CLI flow (`bun run setup <connector>`) stays available.
-- **Wallets** — add an additional wallet address to an existing MetaMask account (multi-wallet under one MCP account, sharing the same Etherscan key + chain selection).
+- **Add Account** — forms for Bybit / MetaMask / Solana / Polymarket. Each form validates against the upstream API before persisting credentials. Explicit security disclosure at the top: credentials submitted via the form transit Claude Desktop's process en route to the keychain. **All four connectors use READ-ONLY credentials by design** (Bybit "Read" only, no Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public; Solana addresses are public on-chain identifiers). Worst-case leak = portfolio-read, never fund movement. For zero-trust, the CLI flow (`bun run setup <connector>`) stays available.
+- **Wallets** — add an additional wallet address to an existing MetaMask OR Solana account (multi-wallet under one MCP account, sharing the same Etherscan key/chain selection or RPC URL).
 - **Custom Tokens** — list / add / remove ERC-20 tokens per chain. Token data is public on-chain; no keychain involvement.
 
 Either path (CLI or Settings UI) writes to the same `~/.headless-tracker/cache.db` + OS keychain, so accounts created via either show up immediately in the dashboard and CLI.
@@ -71,6 +71,7 @@ Run setup for each integration you want. Each prompts for credentials, validates
 ```bash
 bun run bin/headless-tracker.ts setup bybit
 bun run bin/headless-tracker.ts setup metamask
+bun run bin/headless-tracker.ts setup solana
 bun run bin/headless-tracker.ts setup polymarket
 ```
 
@@ -218,8 +219,9 @@ Custom tokens are stored per-account in the SQLite account store (NOT the keycha
 | Bybit V5 | API key + secret | ✓ Full | UNIFIED / SPOT / CONTRACT / FUND accounts. Read-only key. |
 | MetaMask / EVM wallets | Etherscan V2 API key | ✓ Full | Single key covers Ethereum, Polygon, BSC, Base, Arbitrum, Optimism. Native + bundled common ERC-20 tokens (USDC, USDT, WETH, WBTC, LINK, DAI) for balances; native + ERC-20 transfers for transactions. Custom token lists via `headless-tracker token add ...`. Multi-wallet per account (one Etherscan key, multiple addresses). BSC/Base require Etherscan Pro on the free tier (auto-skipped with a warning otherwise). |
 | Polymarket | Proxy wallet address (no API key) | ✓ Full | Uses public data-api. Positions + BUY/SELL trade history (up to ~1000 most recent) via `/trades?user=PROXY`. |
+| Solana wallets | Base58 address (no API key) | ✓ Holdings | Public Solana RPC + Jupiter Price API v2. Native SOL + SPL tokens (Token program v1; Token-2022 deferred). Multi-wallet per account, optional premium RPC URL (Helius/QuickNode/Triton) for users tracking 3+ wallets. Pinned metadata for major mints (USDC/USDT/mSOL/JUP/JTO/PYTH/BONK/RNDR/WIF/JLP). Tx history is `ok([])` for v0.12 — coming in v0.13 with premium-RPC opt-in. |
 
-To add a new connector, implement `Connector` from `src/connectors/types.ts` and add it to `CONNECTOR_FACTORIES` in `src/mcp/orchestrator.ts`. ~150 lines of code per connector based on the existing three.
+To add a new connector, implement `Connector` from `src/connectors/types.ts` and add it to `CONNECTOR_FACTORIES` in `src/mcp/orchestrator.ts`. ~150 lines of code per connector based on the existing four.
 
 ## MCP tools exposed
 

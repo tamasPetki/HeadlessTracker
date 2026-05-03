@@ -20,6 +20,7 @@ import {
 import { BybitConnector } from "../src/connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask.ts";
 import { PolymarketConnector } from "../src/connectors/polymarket.ts";
+import { SolanaConnector } from "../src/connectors/solana.ts";
 import { runStdioServer } from "../src/mcp/server.ts";
 import { executeGetHoldings } from "../src/mcp/tools/get_holdings.ts";
 import { executeGetPnl } from "../src/mcp/tools/get_pnl.ts";
@@ -42,12 +43,13 @@ Usage:
   headless-tracker token <add|list|rm>    Manage custom ERC-20 token list (per MetaMask account/chain)
   headless-tracker help                   Show this help
 
-Connectors: bybit, metamask, polymarket
+Connectors: bybit, metamask, polymarket, solana
 
 Setup examples:
   headless-tracker setup bybit
   headless-tracker setup metamask
   headless-tracker setup polymarket
+  headless-tracker setup solana
 
 Show examples:
   headless-tracker show holdings
@@ -375,9 +377,68 @@ async function setupPolymarket(): Promise<void> {
   console.log("  Test it: ask Claude Desktop \"show my Polymarket positions\"\n");
 }
 
+async function setupSolana(): Promise<void> {
+  console.log("\nSolana wallet setup");
+  console.log("───────────────────");
+  console.log("Public on-chain read — no API key required.");
+  console.log("Public mainnet-beta RPC works for single wallets; for multi-wallet");
+  console.log("setups, supply a premium RPC URL (Helius / QuickNode / Triton) to");
+  console.log("avoid rate limits. Prices via Jupiter Price API v2.\n");
+
+  const address = await readLine("Solana address (base58, e.g. 4k3Dyj...): ");
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
+    console.error("Invalid address format. Expected base58, 32-44 chars.");
+    process.exit(1);
+  }
+
+  const rpcUrlRaw = await readLine("Custom RPC URL (optional, ENTER for public mainnet-beta): ");
+  const rpcUrl = rpcUrlRaw && rpcUrlRaw.length > 0 ? rpcUrlRaw : undefined;
+
+  const dustRaw = await readLine("Dust threshold in USD (default 0.5; 0 = show everything): ");
+  const dustThresholdUsd = dustRaw ? parseFloat(dustRaw) : 0.5;
+  if (Number.isNaN(dustThresholdUsd) || dustThresholdUsd < 0) {
+    console.error(`Invalid dust threshold: ${dustRaw}`);
+    process.exit(1);
+  }
+
+  const fullCreds: Record<string, unknown> = { address, dustThresholdUsd };
+  if (rpcUrl) fullCreds.rpcUrl = rpcUrl;
+
+  const connector = new SolanaConnector();
+  console.log("\nValidating address (probing RPC)...");
+  const validation = await connector.validateCredentials(fullCreds);
+  if (!validation.ok) {
+    console.error(`Validation failed: ${validation.error.message}`);
+    process.exit(1);
+  }
+
+  // Solana addresses are case-sensitive base58 — keep as-is, no lowercase.
+  const accountIdentifier = address;
+  const vault = defaultVault();
+  const setResult = await vault.set("solana", accountIdentifier, fullCreds);
+  if (!setResult.ok) {
+    console.error(`Vault write failed: ${setResult.error.message}`);
+    process.exit(1);
+  }
+
+  const accounts = defaultAccountStore();
+  const labelShort = `${address.slice(0, 4)}…${address.slice(-4)}`;
+  const account: Account = {
+    id: `solana:${accountIdentifier}`,
+    connectorId: "solana",
+    label: `Solana ${labelShort}`,
+    createdAt: Date.now(),
+    metadata: { address, rpcUrl, dustThresholdUsd },
+  };
+  accounts.upsert(account);
+
+  console.log(`\n✓ Solana configured. Account ID: solana:${accountIdentifier}`);
+  console.log("  Test it: ask Claude Desktop \"show my Solana holdings\"\n");
+}
+
 async function setup(connectorId: string | undefined): Promise<void> {
   if (!connectorId) {
-    console.log("Available connectors: bybit, metamask, polymarket");
+    console.log("Available connectors: bybit, metamask, polymarket, solana");
     console.log("Usage: headless-tracker setup <connector>");
     process.exit(1);
   }
@@ -389,6 +450,8 @@ async function setup(connectorId: string | undefined): Promise<void> {
       return setupMetaMask();
     case "polymarket":
       return setupPolymarket();
+    case "solana":
+      return setupSolana();
     default:
       console.error(`Unknown connector: ${connectorId}`);
       process.exit(1);

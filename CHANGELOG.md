@@ -2,6 +2,43 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.12.0 — 2026-05-03
+
+**New connector: Solana wallets.** Read-only on-chain tracking for SOL + SPL tokens via the public Solana RPC + Jupiter Price API v2. No API key required, multi-wallet supported, optional premium RPC URL for power users. Mirrors the MetaMask credential pattern (multi-address per Account) so the Settings UI's Wallets tab now manages BOTH EVM and Solana accounts from one place.
+
+### Added
+
+- **`SolanaConnector`** (`src/connectors/solana.ts`) implementing the `Connector` interface:
+  - `validateCredentials` — accepts a base58 address (or `addresses[]`), optional `rpcUrl`, optional `dustThresholdUsd` (default 0.5 USD). Reachability check via `getBalance` on the first address.
+  - `fetchHoldings` — fans out per-address: parallel `getBalance` (SOL lamports → SOL) + `getTokenAccountsByOwner` (SPL token program v1 accounts). Aggregates non-zero mints, batch-fetches USD prices from Jupiter Price API v2 (one HTTP round-trip for all mints), emits one Holding per (mint × wallet). Honest-unknown rule: tokens with no Jupiter price get `currentPrice: undefined` and are dropped from the result if below the dust threshold AND not in the pinned `KNOWN_MINTS` list (USDC, USDT, mSOL, BONK, JUP, JTO, PYTH, RNDR, WIF, JLP, etc.).
+  - `fetchTransactions` — returns `ok([])` for v0.12. Solana tx history requires `getSignaturesForAddress` + per-sig `getParsedTransaction`, which rate-limits the public RPC fast (~5 req/s sustained on mainnet-beta). Deferred to v0.13 with premium-RPC opt-in.
+  - Default cache TTL: 60s (matches MetaMask).
+- **CLI setup**: `headless-tracker setup solana` — interactive prompts for address, optional RPC URL, dust threshold. Same flow shape as the other connectors.
+- **MCP `setup_connector` tool**: extended discriminated union to accept `connector: "solana"` + `solana: { address, rpcUrl?, dustThresholdUsd? }`. Validates against the connector's `validateCredentials` before persisting.
+- **MCP `add_wallet_address` tool**: now supports BOTH MetaMask AND Solana accounts. Per-connector address validation (EVM hex 0x-prefix vs base58, 32-44 chars). Critical: Solana addresses are case-sensitive base58 — dedup compares as-is, no lowercase mangling. EVM dedup stays case-insensitive.
+- **Settings GUI** (Settings MCP App):
+  - Add Account tab: new "Solana wallet" button + form (address, optional RPC URL placeholder hinting at Helius/QuickNode, dust threshold).
+  - Wallets tab: now lists MetaMask AND Solana accounts in one combined dropdown. Format hint below the address input updates dynamically based on the selected account's connector ("0x + 40 hex" vs "base58, 32-44 chars, case-sensitive").
+  - Accounts tab: Solana accounts get a `solana` tag (Solana brand purple `#9945ff`) and metadata summary (`N addresses, public RPC` or `N addresses, premium RPC`).
+  - Security disclosure: updated to mention all four connectors (Bybit / MetaMask / Polymarket / Solana) and notes that Solana addresses are public on-chain identifiers.
+- **`refresh_data` + `list_accounts` tools**: Solana now an accepted value in the `connector` enum.
+- **Test coverage**: 17 new tests.
+  - `test/connectors/solana.test.ts`: validation (5 cases including bad-base58, missing creds, mocked RPC ok/error), fetchHoldings happy path (SOL + USDC with Jupiter prices), dust filter (unknown low-value dropped, known low-value kept), multi-wallet fan-out (verifies per-address `getBalance` calls), empty-wallet `ok([])`, fetchTransactions returns `ok([])` placeholder.
+  - `test/mcp/tools/admin_tools.test.ts`: setup_connector solana happy path (verifies case-preserving accountId), add_wallet_address Solana append (preserves case), cross-format rejection (EVM address rejected on Solana account, base58 rejected on EVM account).
+
+### Changed
+
+- `ConnectorId` type: `"bybit" | "metamask" | "polymarket"` → `"bybit" | "metamask" | "polymarket" | "solana"`. All TS-exhaustive switches now require a Solana branch (caught one missing entry in `src/cache.ts` `DEFAULT_TTL_SEC`).
+- `SERVER_VERSION` 0.11.1 → 0.12.0; `package.json` bump.
+- `SERVER_INSTRUCTIONS` (system-prompt injection): mentions Solana wallets in the connector list and the Settings routing hint.
+- `add_wallet_address` Zod schema relaxed from `regex(/^0x.../)` to `string().min(32)` because the address shape now depends on the parent account's connectorId. Format validation moved into the tool body where we have access to the account.
+
+### Behavior caveats
+
+- Public mainnet-beta RPC rate-limits aggressively (~100 req/10s). For users tracking 3+ Solana wallets, the Settings form prompts for an optional premium RPC URL (Helius / QuickNode / Triton). The connector will work without one, but `getTokenAccountsByOwner` calls can fail under load.
+- Token-2022 program accounts are NOT yet enumerated (different program id). Holders of Token-2022 tokens (newer, less common) won't see them in v0.12. Deferred.
+- Solana tx history is empty for v0.12 — PnL won't compute realized gains for Solana holdings until v0.13. Cost basis remains "honest unknown" (null), which is the existing contract for any holding without transaction history.
+
 ## v0.11.1 — 2026-05-03
 
 User flagged: generic phrases like "open settings" / "open dashboard" could collide with other MCP servers (Vercel deploys / Sentry errors / Grafana metrics / browser settings / OS settings / etc.) when the user has multiple servers installed. Technical-namespace level there's no collision (Claude Desktop scopes tools as `headless-tracker:render_settings`), but the LLM picks tools by reading descriptions — that's where the practical risk lives. Hardened the descriptions + system prompt to keep Claude on rails.

@@ -25,6 +25,7 @@ import { defaultAccountStore, type AccountStore } from "../../accounts.ts";
 import { BybitConnector } from "../../connectors/bybit.ts";
 import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../../connectors/metamask.ts";
 import { PolymarketConnector } from "../../connectors/polymarket.ts";
+import { SolanaConnector } from "../../connectors/solana.ts";
 import { defaultVault, type Vault } from "../../vault.ts";
 import type { Account } from "../../types.ts";
 
@@ -32,7 +33,7 @@ export const SETUP_CONNECTOR_TOOL_NAME = "setup_connector";
 
 export const SETUP_CONNECTOR_DESCRIPTION = [
   "Creates a new account by writing READ-ONLY credentials to the OS keychain.",
-  "Use when the user asks: 'add a Bybit account', 'connect my MetaMask wallet', 'set up Polymarket', 'add new exchange'.",
+  "Use when the user asks: 'add a Bybit account', 'connect my MetaMask wallet', 'set up Polymarket', 'connect my Solana wallet', 'add new exchange'.",
   "",
   "BEHAVIOR CONTRACT FOR YOU (the LLM):",
   "- After this tool succeeds, confirm ONLY the account label and account_id back to the user.",
@@ -42,13 +43,14 @@ export const SETUP_CONNECTOR_DESCRIPTION = [
   "Credentials are validated against the upstream API before they're persisted; if validation fails, nothing is written.",
   "Storage: OS keychain (macOS Keychain / Linux Secret Service / Windows Credential Vault) via @napi-rs/keyring. Same path as the CLI setup flow.",
   "",
-  "All three connectors use READ-ONLY credentials by design (Bybit 'Read' only, Etherscan is a public-data rate-limit token, Polymarket proxy wallet is already public).",
+  "All four connectors use READ-ONLY credentials by design (Bybit 'Read' only, Etherscan is a public-data rate-limit token, Polymarket proxy wallet is already public, Solana addresses are public on-chain identifiers).",
   "",
-  "Inputs (one of bybit / metamask / polymarket required):",
-  "  - connector: 'bybit' | 'metamask' | 'polymarket'",
+  "Inputs (one of bybit / metamask / polymarket / solana required):",
+  "  - connector: 'bybit' | 'metamask' | 'polymarket' | 'solana'",
   "  - bybit: { apiKey, apiSecret, accountType: 'UNIFIED'|'CONTRACT'|'SPOT'|'FUND' }",
   "  - metamask: { address, etherscanApiKey, chainIds (number[]), trackCommonTokens (bool), hasEtherscanPro (bool) }",
   "  - polymarket: { proxyWallet (0x...), sizeThreshold (default 0.01) }",
+  "  - solana: { address (base58), rpcUrl (optional premium RPC), dustThresholdUsd (optional, default 0.5) }",
 ].join(" ");
 
 const BYBIT_CREDS = z.object({
@@ -70,18 +72,26 @@ const POLYMARKET_CREDS = z.object({
   sizeThreshold: z.number().nonnegative().optional(),
 });
 
+const SOLANA_CREDS = z.object({
+  address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  rpcUrl: z.string().url().optional(),
+  dustThresholdUsd: z.number().nonnegative().optional(),
+});
+
 export const SETUP_CONNECTOR_INPUT_SCHEMA = {
-  connector: z.enum(["bybit", "metamask", "polymarket"]),
+  connector: z.enum(["bybit", "metamask", "polymarket", "solana"]),
   bybit: BYBIT_CREDS.optional(),
   metamask: METAMASK_CREDS.optional(),
   polymarket: POLYMARKET_CREDS.optional(),
+  solana: SOLANA_CREDS.optional(),
 };
 
 export interface SetupConnectorArgs {
-  connector: "bybit" | "metamask" | "polymarket";
+  connector: "bybit" | "metamask" | "polymarket" | "solana";
   bybit?: z.infer<typeof BYBIT_CREDS>;
   metamask?: z.infer<typeof METAMASK_CREDS>;
   polymarket?: z.infer<typeof POLYMARKET_CREDS>;
+  solana?: z.infer<typeof SOLANA_CREDS>;
 }
 
 export interface SetupConnectorResult {
@@ -114,6 +124,10 @@ export async function executeSetupConnector(
   if (args.connector === "polymarket") {
     if (!args.polymarket) return { ok: false, error: "polymarket credentials required" };
     return setupPolymarket(args.polymarket, vault, store);
+  }
+  if (args.connector === "solana") {
+    if (!args.solana) return { ok: false, error: "solana credentials required" };
+    return setupSolana(args.solana, vault, store);
   }
   return { ok: false, error: `unknown connector: ${args.connector}` };
 }
@@ -185,6 +199,41 @@ async function setupMetaMask(
       chainIds: creds.chainIds,
       trackCommonTokens: fullCreds.trackCommonTokens,
       hasEtherscanPro: fullCreds.hasEtherscanPro,
+    },
+  };
+  store.upsert(account);
+  return { ok: true, accountId, label };
+}
+
+async function setupSolana(
+  creds: z.infer<typeof SOLANA_CREDS>,
+  vault: Vault,
+  store: AccountStore
+): Promise<SetupConnectorResult> {
+  const fullCreds: Record<string, unknown> = { address: creds.address };
+  if (creds.rpcUrl) fullCreds.rpcUrl = creds.rpcUrl;
+  if (typeof creds.dustThresholdUsd === "number") fullCreds.dustThresholdUsd = creds.dustThresholdUsd;
+  const conn = new SolanaConnector();
+  const validation = await conn.validateCredentials(fullCreds);
+  if (!validation.ok) return { ok: false, error: `Solana validation failed: ${validation.error.message}` };
+
+  // Solana addresses are case-sensitive base58 — do NOT lowercase like EVM.
+  const accountIdentifier = creds.address;
+  const setResult = await vault.set("solana", accountIdentifier, fullCreds);
+  if (!setResult.ok) return { ok: false, error: `Vault write failed: ${setResult.error.message}` };
+
+  const accountId = `solana:${accountIdentifier}`;
+  const labelShort = `${creds.address.slice(0, 4)}…${creds.address.slice(-4)}`;
+  const label = `Solana ${labelShort}`;
+  const account: Account = {
+    id: accountId,
+    connectorId: "solana",
+    label,
+    createdAt: Date.now(),
+    metadata: {
+      address: creds.address,
+      rpcUrl: creds.rpcUrl,
+      dustThresholdUsd: creds.dustThresholdUsd,
     },
   };
   store.upsert(account);

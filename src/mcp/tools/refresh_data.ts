@@ -11,11 +11,11 @@ import type { ConnectorId } from "../../types.ts";
 export const REFRESH_DATA_TOOL_NAME = "refresh_data";
 
 export const REFRESH_DATA_DESCRIPTION = [
-  "Invalidates the PORTFOLIO TRACKER cache (Bybit/MetaMask/Polymarket holdings + transactions) and forces a fresh fetch from upstream APIs on the next call.",
+  "Invalidates the PORTFOLIO TRACKER cache (Bybit/MetaMask/Polymarket/Solana holdings + transactions) and forces a fresh fetch from upstream APIs on the next call.",
   "Use this when the user asks: 'refresh my portfolio', 'update my holdings', 'get the latest portfolio prices',",
   "'fetch fresh portfolio data', 'check current crypto prices', or implies real-time freshness is required FOR THE TRACKER.",
   "",
-  "Optionally scope to a single connector (bybit, metamask, polymarket).",
+  "Optionally scope to a single connector (bybit, metamask, polymarket, solana).",
   "Without a scope, invalidates everything tracker-related.",
   "",
   "DO NOT call this tool when the user means: refreshing a webpage, refreshing an OAuth token, refreshing browser cache, refreshing data from a non-tracker MCP server. It only invalidates the headless-tracker SQLite cache.",
@@ -29,7 +29,7 @@ export const REFRESH_DATA_DESCRIPTION = [
 // errors in @modelcontextprotocol/sdk's tool() generic. Argument descriptions
 // live in REFRESH_DATA_DESCRIPTION instead.
 export const REFRESH_DATA_INPUT_SCHEMA = {
-  connector: z.enum(["bybit", "metamask", "polymarket"]).optional(),
+  connector: z.enum(["bybit", "metamask", "polymarket", "solana"]).optional(),
 };
 
 export interface RefreshDataArgs {

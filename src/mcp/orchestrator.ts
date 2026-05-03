@@ -10,6 +10,7 @@ import { Cache, defaultCache } from "../cache.ts";
 import { BybitConnector } from "../connectors/bybit.ts";
 import { MetaMaskConnector } from "../connectors/metamask.ts";
 import { PolymarketConnector } from "../connectors/polymarket.ts";
+import { SolanaConnector } from "../connectors/solana.ts";
 import type { Connector, ConnectorContext } from "../connectors/types.ts";
 import { defaultVault, type Vault } from "../vault.ts";
 import type { Account, ConnectorId, Holding, Result, Transaction } from "../types.ts";
@@ -19,6 +20,7 @@ const CONNECTOR_FACTORIES: Record<ConnectorId, () => Connector> = {
   bybit: () => new BybitConnector(),
   metamask: () => new MetaMaskConnector(),
   polymarket: () => new PolymarketConnector(),
+  solana: () => new SolanaConnector(),
 };
 
 export interface OrchestratorOptions {

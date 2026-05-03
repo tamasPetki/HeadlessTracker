@@ -131,6 +131,47 @@ describe("setup_connector — Polymarket (no upstream call mocking needed since 
   });
 });
 
+describe("setup_connector — Solana (mocked RPC validation)", () => {
+  test("missing credentials block returns ok=false with clear error", async () => {
+    const r = await executeSetupConnector(
+      { connector: "solana" },
+      { vault: vault as never, store }
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("solana credentials required");
+  });
+
+  test("happy path: solana setup writes to vault + AccountStore", async () => {
+    // Mock the RPC getBalance call to succeed.
+    globalThis.fetch = (async (): Promise<Response> =>
+      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { value: 0 } }), { status: 200 })
+    ) as unknown as typeof fetch;
+
+    const addr = "vaPrxbCkFJiy4ksy76C8gpW5G2NJfnaC7XrjvW3KWdb";
+    const r = await executeSetupConnector(
+      { connector: "solana", solana: { address: addr, dustThresholdUsd: 0.1 } },
+      { vault: vault as never, store }
+    );
+
+    expect(r.ok).toBe(true);
+    // Critical: Solana addresses are case-sensitive — no lowercase mangling.
+    expect(r.accountId).toBe(`solana:${addr}`);
+    expect(r.label).toContain("Solana");
+
+    const stored = store.get(r.accountId!);
+    expect(stored).not.toBeNull();
+    expect(stored!.connectorId).toBe("solana");
+    expect(stored!.metadata?.address).toBe(addr);
+
+    // Vault got the credential under the case-preserving identifier.
+    const credsResult = await vault.get("solana", addr);
+    expect(credsResult.ok).toBe(true);
+    if (credsResult.ok) {
+      expect((credsResult.value as { address: string }).address).toBe(addr);
+    }
+  });
+});
+
 // ============================================================================
 // add_wallet_address
 // ============================================================================
@@ -199,6 +240,58 @@ describe("add_wallet_address", () => {
     );
     expect(r.ok).toBe(false);
     expect(r.error).toContain("already tracked");
+  });
+
+  test("Solana: appends new address (case-sensitive base58, no lowercase)", async () => {
+    const initial = "vaPrxbCkFJiy4ksy76C8gpW5G2NJfnaC7XrjvW3KWdb";
+    const newAddr = "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1";
+    const accountId = `solana:${initial}`;
+    store.upsert({ id: accountId, connectorId: "solana", label: "Sol", createdAt: 1, metadata: { address: initial } });
+    vault.set("solana", initial, { address: initial });
+
+    const r = await executeAddWalletAddress(
+      { account_id: accountId, address: newAddr },
+      { vault: vault as never, store }
+    );
+    expect(r.ok).toBe(true);
+    expect(r.addresses).toEqual([initial, newAddr]);
+
+    const credsResult = await vault.get("solana", initial);
+    expect(credsResult.ok).toBe(true);
+    if (credsResult.ok) {
+      const creds = credsResult.value as { addresses?: string[]; address?: string };
+      // Critical: addresses preserved as-is (case-sensitive). No lowercase.
+      expect(creds.addresses).toEqual([initial, newAddr]);
+      expect(creds.address).toBeUndefined();
+    }
+  });
+
+  test("Solana: rejects EVM-format 0x address as malformed", async () => {
+    const addr = "vaPrxbCkFJiy4ksy76C8gpW5G2NJfnaC7XrjvW3KWdb";
+    const accountId = `solana:${addr}`;
+    store.upsert({ id: accountId, connectorId: "solana", label: "Sol", createdAt: 1, metadata: { address: addr } });
+    vault.set("solana", addr, { address: addr });
+
+    const r = await executeAddWalletAddress(
+      { account_id: accountId, address: "0x" + "b".repeat(40) },
+      { vault: vault as never, store }
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("Invalid Solana address");
+  });
+
+  test("MetaMask: rejects base58 (Solana-format) address as malformed", async () => {
+    const addr = "0x" + "a".repeat(40);
+    const accountId = `metamask:${addr.toLowerCase()}`;
+    store.upsert({ id: accountId, connectorId: "metamask", label: "M", createdAt: 1, metadata: { addresses: [addr] } });
+    vault.set("metamask", addr.toLowerCase(), { addresses: [addr] });
+
+    const r = await executeAddWalletAddress(
+      { account_id: accountId, address: "vaPrxbCkFJiy4ksy76C8gpW5G2NJfnaC7XrjvW3KWdb" },
+      { vault: vault as never, store }
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("Invalid EVM address");
   });
 });
 

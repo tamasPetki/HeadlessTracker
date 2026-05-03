@@ -151,6 +151,11 @@ function describeMetadata(connectorId: string, meta: Record<string, unknown>): s
   if (connectorId === "polymarket") {
     return `proxy ${typeof meta.proxyWallet === "string" ? (meta.proxyWallet.slice(0, 6) + "…" + meta.proxyWallet.slice(-4)) : "?"}`;
   }
+  if (connectorId === "solana") {
+    const addrs = Array.isArray(meta.addresses) ? meta.addresses as string[] : (typeof meta.address === "string" ? [meta.address] : []);
+    const rpc = typeof meta.rpcUrl === "string" && meta.rpcUrl.length > 0 ? "premium RPC" : "public RPC";
+    return `${addrs.length} address${addrs.length === 1 ? "" : "es"}, ${rpc}`;
+  }
   return "";
 }
 
@@ -160,7 +165,7 @@ function describeMetadata(connectorId: string, meta: Record<string, unknown>): s
 
 const SECURITY_DISCLOSURE = `<div class="disclosure">
   <strong>Security:</strong> Credentials submitted here transit Claude Desktop's process en route to your OS keychain.
-  All three connectors use READ-ONLY credentials by design (Bybit "Read" only, no Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public).
+  All four connectors use READ-ONLY credentials by design (Bybit "Read" only, no Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public; Solana addresses are public on-chain identifiers).
   Worst-case leak is a portfolio-read, never a fund movement.
   For the strictest path that NEVER touches Claude Desktop, use the CLI: <code>bun run setup &lt;connector&gt;</code>.
 </div>`;
@@ -173,6 +178,7 @@ async function renderAddAccount(): Promise<void> {
       <div class="connector-buttons">
         <button class="btn-primary" data-connector="bybit">Bybit (read-only API key)</button>
         <button class="btn-primary" data-connector="metamask">MetaMask / EVM wallet</button>
+        <button class="btn-primary" data-connector="solana">Solana wallet</button>
         <button class="btn-primary" data-connector="polymarket">Polymarket (wallet only)</button>
       </div>
       <div id="connector-form"></div>
@@ -250,6 +256,31 @@ function renderConnectorForm(connector: string): void {
     });
     return;
   }
+  if (connector === "solana") {
+    slot.innerHTML = `
+      <h3>Solana wallet setup</h3>
+      <p class="muted">Paste your base58 Solana address. Public RPC works for single wallets — multi-wallet setups should supply a premium RPC (Helius, QuickNode, Triton) to avoid rate limits. Prices via Jupiter Price API v2.</p>
+      <form id="form-sol" class="form-grid">
+        <label>Solana address<input name="address" type="text" pattern="^[1-9A-HJ-NP-Za-km-z]{32,44}$" required placeholder="(base58, e.g. 4k3Dyj...)" autocomplete="off"></label>
+        <label>RPC URL (optional)<input name="rpcUrl" type="url" placeholder="https://mainnet.helius-rpc.com/?api-key=..." autocomplete="off">
+          <small class="muted">Leave blank for public mainnet-beta.</small>
+        </label>
+        <label>Dust threshold (USD)<input name="dustThresholdUsd" type="number" step="0.01" value="0.5" min="0">
+          <small class="muted">Hide tokens worth less than this. 0 to show everything.</small>
+        </label>
+        <button type="submit" class="btn-primary">Validate &amp; Save</button>
+      </form>
+      <div id="form-result"></div>`;
+    wireForm("form-sol", async (data) => callTool("setup_connector", {
+      connector: "solana",
+      solana: {
+        address: data.address,
+        rpcUrl: data.rpcUrl && data.rpcUrl.length > 0 ? data.rpcUrl : undefined,
+        dustThresholdUsd: data.dustThresholdUsd ? parseFloat(data.dustThresholdUsd) : undefined,
+      },
+    }));
+    return;
+  }
   if (connector === "polymarket") {
     slot.innerHTML = `
       <h3>Polymarket setup</h3>
@@ -313,13 +344,19 @@ function wireForm(formId: string, submit: (data: Record<string, string>) => Prom
 async function renderWallets(): Promise<void> {
   const target = $("tab-content");
   showLoading(target);
-  const r = await callTool<ListAccountsResp>("list_accounts", { connector: "metamask" });
-  if (!r) {
+  // Multi-wallet supported by MetaMask AND Solana (v0.12+). Fetch both lists,
+  // merge, and let the form route per-account based on connectorId.
+  const [mmResp, solResp] = await Promise.all([
+    callTool<ListAccountsResp>("list_accounts", { connector: "metamask" }),
+    callTool<ListAccountsResp>("list_accounts", { connector: "solana" }),
+  ]);
+  if (!mmResp || !solResp) {
     target.innerHTML = '<div class="error">Failed to load accounts.</div>';
     return;
   }
-  if (r.accounts.length === 0) {
-    target.innerHTML = `<section><p class="empty">No MetaMask accounts yet. Add one in <a href="#" data-tab-link="add-account">Add Account</a>.</p></section>`;
+  const accounts = [...mmResp.accounts, ...solResp.accounts];
+  if (accounts.length === 0) {
+    target.innerHTML = `<section><p class="empty">No multi-wallet capable accounts yet (MetaMask or Solana). Add one in <a href="#" data-tab-link="add-account">Add Account</a>.</p></section>`;
     target.querySelector<HTMLAnchorElement>("[data-tab-link]")?.addEventListener("click", (e) => {
       e.preventDefault();
       activeTab = "add-account";
@@ -329,18 +366,22 @@ async function renderWallets(): Promise<void> {
     return;
   }
 
+  // The native HTML pattern attribute can only hold one regex, so we validate
+  // server-side via add_wallet_address. Show a hint near the input instead.
   target.innerHTML = `
     <section>
-      <h3>Add an additional address to a MetaMask account</h3>
-      <p class="muted">The new address shares the same Etherscan key + chain selection as the parent account. Multi-wallet under one MCP account.</p>
+      <h3>Add an additional address to a wallet account</h3>
+      <p class="muted">The new address shares the parent account's settings (Etherscan key + chains for MetaMask, RPC URL for Solana). Multi-wallet under one MCP account.</p>
       <form id="form-wallet" class="form-grid">
-        <label>MetaMask account<select name="account_id" required>
-          ${r.accounts.map((a) => {
+        <label>Account<select name="account_id" required>
+          ${accounts.map((a) => {
             const addrs = Array.isArray(a.metadata.addresses) ? a.metadata.addresses as string[] : (typeof a.metadata.address === "string" ? [a.metadata.address] : []);
-            return `<option value="${escapeHtml(a.id)}">${escapeHtml(a.label)} — ${addrs.length} address${addrs.length === 1 ? "" : "es"}</option>`;
+            return `<option value="${escapeHtml(a.id)}" data-connector="${escapeHtml(a.connectorId)}">${escapeHtml(a.label)} — ${addrs.length} address${addrs.length === 1 ? "" : "es"}</option>`;
           }).join("")}
         </select></label>
-        <label>New wallet address<input name="address" type="text" pattern="^0x[a-fA-F0-9]{40}$" required placeholder="0x..." autocomplete="off"></label>
+        <label>New wallet address<input name="address" type="text" required placeholder="0x... or base58" autocomplete="off">
+          <small class="muted" id="wallet-format-hint">Paste a 0x EVM address for MetaMask, or a base58 address for Solana.</small>
+        </label>
         <button type="submit" class="btn-primary">Add address</button>
       </form>
       <div id="form-result"></div>
@@ -349,12 +390,13 @@ async function renderWallets(): Promise<void> {
     <section>
       <h3>Tracked addresses by account</h3>
       <table>
-        <thead><tr><th>Account</th><th>Addresses</th></tr></thead>
+        <thead><tr><th>Account</th><th>Connector</th><th>Addresses</th></tr></thead>
         <tbody>
-          ${r.accounts.map((a) => {
+          ${accounts.map((a) => {
             const addrs = Array.isArray(a.metadata.addresses) ? a.metadata.addresses as string[] : (typeof a.metadata.address === "string" ? [a.metadata.address] : []);
             return `<tr>
               <td><strong>${escapeHtml(a.label)}</strong></td>
+              <td><span class="tag tag-${escapeHtml(a.connectorId)}">${escapeHtml(a.connectorId)}</span></td>
               <td>${addrs.map((x) => `<code class="mono">${escapeHtml(x)}</code>`).join("<br>")}</td>
             </tr>`;
           }).join("")}
@@ -363,6 +405,20 @@ async function renderWallets(): Promise<void> {
     </section>`;
 
   const form = document.getElementById("form-wallet") as HTMLFormElement;
+  // Update the format hint as the user picks a different account so EVM vs
+  // base58 expectations are obvious before they paste.
+  const accountSelect = form.querySelector<HTMLSelectElement>("select[name=account_id]")!;
+  const updateHint = () => {
+    const opt = accountSelect.options[accountSelect.selectedIndex];
+    const conn = opt?.dataset.connector ?? "";
+    const hint = $("wallet-format-hint") as HTMLElement;
+    if (conn === "metamask") hint.textContent = "Format: 0x + 40 hex chars (EVM).";
+    else if (conn === "solana") hint.textContent = "Format: base58, 32-44 chars (Solana). Case-sensitive.";
+    else hint.textContent = "";
+  };
+  accountSelect.addEventListener("change", updateHint);
+  updateHint();
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(form);

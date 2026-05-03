@@ -13,19 +13,19 @@ import { defaultAccountStore, type AccountStore } from "../../accounts.ts";
 export const LIST_ACCOUNTS_TOOL_NAME = "list_accounts";
 
 export const LIST_ACCOUNTS_DESCRIPTION = [
-  "Lists configured PORTFOLIO TRACKER accounts (Bybit exchange / MetaMask wallets / Polymarket) without exposing credentials.",
+  "Lists configured PORTFOLIO TRACKER accounts (Bybit exchange / MetaMask wallets / Polymarket / Solana wallets) without exposing credentials.",
   "Use when the user asks: 'what tracker accounts are configured', 'show my portfolio accounts', 'list my exchange connections', 'which crypto exchanges are linked'.",
-  "Returns: id, connectorId (bybit | metamask | polymarket), label, createdAt, and connector-specific public metadata (e.g. chainIds and addresses for MetaMask, accountType for Bybit).",
+  "Returns: id, connectorId (bybit | metamask | polymarket | solana), label, createdAt, and connector-specific public metadata (e.g. chainIds and addresses for MetaMask, accountType for Bybit, address for Solana).",
   "Credentials are NEVER returned — they stay in the OS keychain.",
   "DO NOT call this tool when the user means: email accounts, social media accounts, GitHub accounts, cloud accounts, OS user accounts, or any 'accounts' from a different domain or MCP server. It's specifically the headless-tracker exchange/wallet connections.",
 ].join(" ");
 
 export const LIST_ACCOUNTS_INPUT_SCHEMA = {
-  connector: z.enum(["bybit", "metamask", "polymarket"]).optional(),
+  connector: z.enum(["bybit", "metamask", "polymarket", "solana"]).optional(),
 };
 
 export interface ListAccountsArgs {
-  connector?: "bybit" | "metamask" | "polymarket";
+  connector?: "bybit" | "metamask" | "polymarket" | "solana";
 }
 
 export interface ListedAccount {
