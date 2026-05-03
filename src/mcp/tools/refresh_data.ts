@@ -11,12 +11,14 @@ import type { ConnectorId } from "../../types.ts";
 export const REFRESH_DATA_TOOL_NAME = "refresh_data";
 
 export const REFRESH_DATA_DESCRIPTION = [
-  "Invalidates the cache and forces a fresh fetch from upstream APIs on the next call.",
-  "Use this when the user asks: 'refresh', 'update my data', 'get the latest',",
-  "'fetch now', 'check current prices', or implies real-time freshness is required.",
+  "Invalidates the PORTFOLIO TRACKER cache (Bybit/MetaMask/Polymarket holdings + transactions) and forces a fresh fetch from upstream APIs on the next call.",
+  "Use this when the user asks: 'refresh my portfolio', 'update my holdings', 'get the latest portfolio prices',",
+  "'fetch fresh portfolio data', 'check current crypto prices', or implies real-time freshness is required FOR THE TRACKER.",
   "",
   "Optionally scope to a single connector (bybit, metamask, polymarket).",
-  "Without a scope, invalidates everything.",
+  "Without a scope, invalidates everything tracker-related.",
+  "",
+  "DO NOT call this tool when the user means: refreshing a webpage, refreshing an OAuth token, refreshing browser cache, refreshing data from a non-tracker MCP server. It only invalidates the headless-tracker SQLite cache.",
   "",
   "After calling this, follow up with get_holdings or another data tool to actually",
   "fetch the fresh data — refresh_data only marks the cache as stale, it does not",

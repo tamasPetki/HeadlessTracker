@@ -39,13 +39,15 @@ async function loadHtml(): Promise<string> {
 }
 
 export const RENDER_DASHBOARD_DESCRIPTION = [
-  "Render an interactive portfolio dashboard as an MCP App (live UI panel).",
-  "Use this when the user asks: 'show my dashboard', 'open the dashboard', 'render dashboard',",
-  "or wants a live interactive view of holdings / weekly review / risk audit.",
+  "Render an interactive PORTFOLIO TRACKER dashboard as an MCP App (live UI panel) — for crypto holdings, P&L, prediction markets, on-chain wallets.",
+  "Use this when the user asks: 'show my portfolio dashboard', 'open my dashboard', 'render the portfolio panel',",
+  "or wants a live interactive view of holdings / weekly portfolio review / risk audit.",
   "Three tabs (Portfolio / Weekly / Risk) with currency switcher (USD/EUR/GBP/HUF) and refresh button.",
   "The iframe makes its own tool calls (get_holdings / get_pnl / get_allocations / get_transactions / get_polymarket_positions / refresh_data)",
   "as the user clicks tabs and refresh — no extra prompting from you needed once it's open.",
   "If the host doesn't render MCP Apps, the tool still returns a textual confirmation but the user won't get the live UI.",
+  "",
+  "DO NOT call this tool when the user means a different kind of dashboard (Vercel deploys, Sentry errors, Grafana metrics, GitHub activity, analytics events, etc.). It's specifically the headless-tracker portfolio dashboard. If the request is ambiguous, ask the user to clarify which dashboard they mean.",
   "",
   "Inputs (both optional):",
   "  - currency: 'USD' | 'EUR' | 'GBP' | 'HUF'. Initial display currency. User can switch live.",

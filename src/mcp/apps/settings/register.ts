@@ -33,14 +33,16 @@ async function loadHtml(): Promise<string> {
 }
 
 export const RENDER_SETTINGS_DESCRIPTION = [
-  "Render the Settings panel as an MCP App (live UI panel) — the GUI alternative to the CLI setup flow.",
-  "Use when the user asks: 'set up an account', 'add Bybit', 'add MetaMask wallet', 'connect Polymarket',",
-  "'show settings', 'list my accounts', 'remove this connection', 'add a custom token', 'add another wallet address'.",
+  "Render the PORTFOLIO TRACKER Settings panel as an MCP App (live UI panel) — the GUI alternative to the CLI setup flow for headless-tracker (Bybit / MetaMask / Polymarket connections).",
+  "Use when the user asks: 'open my portfolio settings', 'add a Bybit account', 'connect my MetaMask wallet to the tracker',",
+  "'show my tracker accounts', 'remove this exchange connection', 'add a custom ERC-20 token', 'add another wallet address to track'.",
   "Four tabs:",
-  "  - Accounts: read-only list with Remove buttons (one-way confirm dialog).",
+  "  - Accounts: read-only list of configured tracker accounts with Remove buttons (one-way confirm dialog).",
   "  - Add Account: forms for Bybit / MetaMask / Polymarket with explicit security disclosure.",
-  "  - Wallets: add an additional wallet address to an existing MetaMask account.",
+  "  - Wallets: add an additional wallet address to an existing MetaMask tracker account.",
   "  - Custom Tokens: list + add/remove ERC-20 tokens per chain.",
+  "",
+  "DO NOT call this tool when the user means: app settings (Claude Desktop / VS Code / browser), system preferences, OS settings, account settings on websites, profile settings, notification settings, theme/appearance, or any settings UI from a different MCP server. It's specifically the headless-tracker portfolio-tracker setup panel. If the request is ambiguous (just 'open settings'), ask which settings.",
   "",
   "BEHAVIOR CONTRACT FOR YOU (the LLM):",
   "If the user pastes credentials directly in chat, prefer pointing them at this Settings UI rather than calling setup_connector with the inline values — the form keeps secrets out of the conversation transcript.",

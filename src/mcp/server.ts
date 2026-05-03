@@ -101,7 +101,7 @@ import {
 } from "./tools/token_admin.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.11.0";
+const SERVER_VERSION = "0.11.1";
 
 // Surfaces in the InitializeResult.instructions field, which Claude Desktop
 // (and most MCP hosts) inject into the system prompt. Cuts wasted tool_search
@@ -112,7 +112,9 @@ const SERVER_VERSION = "0.11.0";
 // Aim: under 2KB. Sectioned for skimmability. Don't repeat each tool's full
 // description (those load on demand) — just the routing hints + caveats the
 // model can't infer from the schema alone.
-const SERVER_INSTRUCTIONS = `headless-tracker is a local-first portfolio tracker (Bybit + MetaMask multi-chain + Polymarket).
+const SERVER_INSTRUCTIONS = `headless-tracker is a local-first PORTFOLIO TRACKER for crypto holdings, prediction markets, and on-chain wallets (Bybit exchange + MetaMask multi-chain + Polymarket). All tools and apps in this server are scoped to that domain.
+
+DOMAIN ANCHOR (avoid cross-server confusion): if the user's request is about anything OTHER than crypto/wallet/portfolio/exchange data — Vercel deployments, Sentry errors, Grafana metrics, GitHub activity, browser settings, app settings, OS preferences, email accounts, social accounts — DO NOT call headless-tracker tools. Defer to the appropriate MCP server. When the user says generic things like 'open dashboard' or 'open settings' WITHOUT context implying portfolio, ask for clarification before invoking render_dashboard / render_settings.
 
 WHAT YOU CAN ANSWER WITHOUT EXTRA TOOL DISCOVERY (call the named tool directly):
 

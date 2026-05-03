@@ -2,6 +2,36 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.11.1 — 2026-05-03
+
+User flagged: generic phrases like "open settings" / "open dashboard" could collide with other MCP servers (Vercel deploys / Sentry errors / Grafana metrics / browser settings / OS settings / etc.) when the user has multiple servers installed. Technical-namespace level there's no collision (Claude Desktop scopes tools as `headless-tracker:render_settings`), but the LLM picks tools by reading descriptions — that's where the practical risk lives. Hardened the descriptions + system prompt to keep Claude on rails.
+
+### Changed
+
+- **`render_dashboard` description**: now leads with "PORTFOLIO TRACKER dashboard" (not just "dashboard") and explicitly lists what it's NOT for: Vercel deploys, Sentry errors, Grafana metrics, GitHub activity, analytics events. Mirror change to `render_settings` ruling out app/browser/OS/website settings + a different MCP server's settings panel.
+- **`list_accounts` description**: now anchors on "PORTFOLIO TRACKER accounts" and disambiguates from email accounts, social accounts, GitHub accounts, OS user accounts, etc.
+- **`refresh_data` description**: same treatment — anchors on portfolio cache, rules out webpage/OAuth/browser cache refresh.
+- **`SERVER_INSTRUCTIONS` (system prompt injection)** now leads with a DOMAIN ANCHOR section: "if the user's request is about anything OTHER than crypto/wallet/portfolio/exchange data, DO NOT call headless-tracker tools. When the user says generic things like 'open dashboard' or 'open settings' WITHOUT context implying portfolio, ask for clarification." This is the strongest disambiguation lever — gets injected into Claude's system prompt at session start.
+
+### Why this approach (description + instructions, not tool rename)
+
+1. Server-namespace already prevents literal collision (`headless-tracker:render_settings` vs `notion-mcp:render_settings`). The LLM-routing collision is the real problem.
+2. LLM-routing is solved by domain-anchored descriptions + negative-space "NOT for X" hints + DOMAIN ANCHOR in system prompt instructions.
+3. Tool renames (`render_dashboard` → `portfolio_dashboard`) would help slightly more but break compatibility for anyone who has the names pinned in custom skills/notes/commands. Cost > benefit at this stage.
+4. If we ever observe a real collision in practice (Claude calls our tool when the user clearly meant a different server's), we'll rename — until then, descriptions stay the lever.
+
+### Tests
+
+- 274 tests pass unchanged. Description content changed but the existing assertions check for tool names, tab coverage, behavior contracts — those still hold. The dashboard / settings smoke tests assert `>200 chars` description length; new descriptions are longer.
+
+### What this changes for the user
+
+- "open dashboard" (no portfolio context) → Claude asks "the portfolio dashboard, or did you mean a different one?" instead of jumping straight to render_dashboard.
+- "open settings" → same clarification reflex.
+- "show my portfolio" / "open my portfolio dashboard" / "open headless-tracker settings" → unambiguous, calls the right tool immediately.
+
+The verbose disclosure in tool descriptions costs ~200 extra tokens per session in the system-prompt-injected instructions. Cheap insurance.
+
 ## v0.11.0 — 2026-05-03
 
 The big UX leap: **a full Settings MCP App** for setup + admin, completely replacing the need to drop into a terminal for connecting/managing accounts. User can ask "open settings" and get a live 4-tab UI panel inside Claude Desktop.
