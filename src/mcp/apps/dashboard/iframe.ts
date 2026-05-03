@@ -71,7 +71,18 @@ function fmtMoney(n: number | null | undefined, ccy: Currency = currency): strin
   return `${sign}${symbol}${abs.toFixed(4)}`;
 }
 
+// Unsigned percent formatter for non-negative values (allocations, share-of-total,
+// concentration percentages). No leading "+" — those are always >= 0 and the sign
+// adds noise.
 function fmtPct(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return `${n.toFixed(2)}%`;
+}
+
+// Signed percent formatter for delta / change values where direction matters
+// (e.g. windowDelta.deltaPercent — could be a gain or a loss). Renders "+5.20%"
+// for gains and "-3.10%" for losses so the sign is unmissable.
+function fmtPctChange(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   const sign = n >= 0 ? "+" : "";
   return `${sign}${n.toFixed(2)}%`;
@@ -257,7 +268,7 @@ async function renderPortfolio(): Promise<void> {
     callTool<HoldingsResult>("get_holdings", { currency }),
     // Pull more than we'll display so we can compute the "Other" tail bucket.
     callTool<AllocationsResult>("get_allocations", { by: "symbol" }),
-    callTool<PnlResult>("get_pnl", {}),
+    callTool<PnlResult>("get_pnl", { currency }),
   ]);
 
   if (!h) {
@@ -357,7 +368,7 @@ async function renderWeekly(): Promise<void> {
   const target = $("tab-content");
   showLoading(target);
   const [pnl, txns] = await Promise.all([
-    callTool<PnlWithWindow>("get_pnl", { timeframe: "7d" }),
+    callTool<PnlWithWindow>("get_pnl", { timeframe: "7d", currency }),
     callTool<TransactionsResult>("get_transactions", { since: "7d" }),
   ]);
 
@@ -383,7 +394,7 @@ async function renderWeekly(): Promise<void> {
         <div class="kpi"><div class="kpi-label">7d ago</div><div class="kpi-value">${fmtMoney(wd.historicalValue)}</div><div class="kpi-meta">${escapeHtml(wd.asOfDate.slice(0, 10))}</div></div>
         <div class="kpi"><div class="kpi-label">Now</div><div class="kpi-value">${fmtMoney(wd.currentValueAtSnapshot)}</div></div>
         <div class="kpi"><div class="kpi-label">Delta</div><div class="kpi-value ${wd.delta >= 0 ? "pos" : "neg"}">${fmtMoney(wd.delta)}</div></div>
-        <div class="kpi"><div class="kpi-label">% change</div><div class="kpi-value ${wd.deltaPercent >= 0 ? "pos" : "neg"}">${fmtPct(wd.deltaPercent)}</div></div>
+        <div class="kpi"><div class="kpi-label">% change</div><div class="kpi-value ${wd.deltaPercent >= 0 ? "pos" : "neg"}">${fmtPctChange(wd.deltaPercent)}</div></div>
       </div>
       <div class="meta-line">${wd.pricedSymbols} priced, ${wd.skippedSymbols} skipped</div>
       ${skipBlock}

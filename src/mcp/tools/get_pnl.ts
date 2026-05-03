@@ -20,6 +20,14 @@ import { defaultOrchestrator, type Orchestrator } from "../orchestrator.ts";
 import type { Holding, Transaction } from "../../types.ts";
 import { computeCostBasisWithMethod, type CostBasisMethod } from "../../cost_basis.ts";
 import { defaultPriceService, PriceService } from "../../prices.ts";
+import {
+  convert,
+  fetchFxRates,
+  rateFromUsd,
+  type Currency,
+  type FxRates,
+  type FxSource,
+} from "../../fx.ts";
 
 export const GET_PNL_TOOL_NAME = "get_pnl";
 
@@ -61,6 +69,12 @@ export const GET_PNL_DESCRIPTION = [
   "    Both methods preserve the 'honest unknown' rule: any sell drawing from an",
   "    unpriced deposit/transfer returns realizedPnl=null, NOT a fabricated number.",
   "    Has NO effect when include_history=false.",
+  "  - currency ('USD' | 'EUR' | 'GBP' | 'HUF', default 'USD'): when set to anything",
+  "    other than USD, ALL numeric fields (currentValue, costBasis, realizedPnl,",
+  "    unrealizedPnl, windowDelta numbers, realizedFromHistory.knownRealized) are",
+  "    converted via live FX rates. The fx.source + fetchedAt are surfaced in `meta.fx`.",
+  "    Use this for currency-consistent rendering when the user asked their dashboard",
+  "    to be in HUF/EUR/GBP — otherwise per-tab currencies will mismatch.",
 ].join(" ");
 
 export const GET_PNL_INPUT_SCHEMA = {
@@ -68,6 +82,7 @@ export const GET_PNL_INPUT_SCHEMA = {
   timeframe: z.enum(["24h", "7d", "30d", "ytd", "all"]).optional(),
   include_history: z.boolean().optional(),
   method: z.enum(["fifo", "average"]).optional(),
+  currency: z.enum(["USD", "EUR", "GBP", "HUF"]).optional(),
 };
 
 export interface GetPnlArgs {
@@ -79,6 +94,8 @@ export interface GetPnlArgs {
   include_history?: boolean;
   // Cost basis method. Default 'fifo'. Only meaningful when include_history=true.
   method?: CostBasisMethod;
+  // Display currency for all numeric fields. Default 'USD' (no conversion).
+  currency?: Currency;
 }
 
 interface AccountPnl {
@@ -140,6 +157,16 @@ export interface GetPnlResult {
   timeframeNote: string;
   // Echoes back the cost-basis method actually used. null when include_history=false.
   costBasisMethod: CostBasisMethod | null;
+  // Currency the response is denominated in (default "USD").
+  currency: Currency;
+  // FX info — present iff currency was non-USD. Surfaces source so callers
+  // can warn the user when rates came from the static fallback (stale).
+  fx?: {
+    targetCurrency: Currency;
+    source: FxSource;
+    rateUsdToTarget: number;
+    fetchedAt: string;
+  };
   asOf: string;
 }
 
@@ -320,6 +347,62 @@ export async function executeGetPnl(
     timeframeNote = "Point-in-time aggregate P&L from connector metadata.";
   }
 
+  // Currency conversion (display layer). Storage is USD-equivalent; if the
+  // caller asked for HUF/EUR/GBP, we fetch FX rates and convert all numeric
+  // fields end-to-end. fetchFxRates always returns ok() — worst case is the
+  // hardcoded fallback rates with `source: "fallback"`, which we surface in
+  // meta.fx so the caller can warn the user.
+  const targetCurrency: Currency = args.currency ?? "USD";
+  let fxMeta: GetPnlResult["fx"] | undefined;
+  if (targetCurrency !== "USD") {
+    const fxResult = await fetchFxRates();
+    if (fxResult.ok) {
+      const rates = fxResult.value;
+      fxMeta = {
+        targetCurrency,
+        source: rates.source,
+        rateUsdToTarget: rateFromUsd(targetCurrency, rates),
+        fetchedAt: new Date(rates.fetchedAt).toISOString(),
+      };
+      // Convert in place. Each call: USD → targetCurrency, null preserved.
+      const c = (v: number | null): number | null =>
+        v === null ? null : convert(v, "USD", targetCurrency, rates);
+      const cnn = (v: number): number => convert(v, "USD", targetCurrency, rates);
+
+      totalCurrent = cnn(totalCurrent);
+      totalCostBasis = cnn(totalCostBasis);
+      totalUnrealized = cnn(totalUnrealized);
+      totalRealized = cnn(totalRealized);
+      if (totalHistory) {
+        totalHistory = { ...totalHistory, knownRealized: cnn(totalHistory.knownRealized) };
+      }
+      if (windowDelta) {
+        windowDelta = {
+          ...windowDelta,
+          historicalValue: cnn(windowDelta.historicalValue),
+          currentValueAtSnapshot: cnn(windowDelta.currentValueAtSnapshot),
+          delta: cnn(windowDelta.delta),
+          // deltaPercent is a ratio (delta/historical) — currency-invariant, do NOT convert.
+        };
+      }
+      for (const a of byAccount) {
+        a.currentValue = cnn(a.currentValue);
+        a.costBasis = c(a.costBasis);
+        a.unrealizedPnl = c(a.unrealizedPnl);
+        a.realizedPnl = c(a.realizedPnl);
+        if (a.realizedFromHistory) {
+          a.realizedFromHistory = { ...a.realizedFromHistory, knownRealized: cnn(a.realizedFromHistory.knownRealized) };
+        }
+      }
+      if (rates.source === "fallback") {
+        // Annotate the topmost set of notes so it surfaces. Pick byAccount[0]
+        // if present, else add a synthetic note (we don't have a top-level
+        // notes array). The dashboard / CLI surfaces fx.source directly too.
+        // No-op here — callers read fx.source directly and decide.
+      }
+    }
+  }
+
   return {
     total: {
       currentValue: totalCurrent,
@@ -334,6 +417,8 @@ export async function executeGetPnl(
     timeframeRequested: args.timeframe ?? null,
     timeframeNote,
     costBasisMethod: args.include_history ? method : null,
+    currency: targetCurrency,
+    ...(fxMeta ? { fx: fxMeta } : {}),
     asOf: new Date().toISOString(),
   };
 }

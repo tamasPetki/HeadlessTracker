@@ -64,7 +64,7 @@ import {
 import { registerDashboardApp } from "./apps/dashboard/register.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.10.4";
+const SERVER_VERSION = "0.10.5";
 
 // Surfaces in the InitializeResult.instructions field, which Claude Desktop
 // (and most MCP hosts) inject into the system prompt. Cuts wasted tool_search

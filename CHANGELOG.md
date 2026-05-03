@@ -2,6 +2,41 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v0.10.5 — 2026-05-03
+
+User-spotted bugs from a HUF dashboard screenshot:
+
+1. **"Realized PnL (connector) -24620 Ft"** — wrong. The number was the USD amount with "Ft" suffix slapped on. `get_pnl` had no `currency` arg, so it always returned USD numbers regardless of the dashboard's currency state. Holdings were converting (via `get_holdings --currency=HUF`) but PnL fields weren't.
+2. **"+52.09%" / "+12.25%" etc. on the Top Positions table** — the leading `+` is meaningless on allocation percentages (a position can't be a negative share of a portfolio). The sign was useful only for delta values (windowDelta change), but the same `fmtPct` helper drove both contexts.
+
+### Added
+
+- **`currency` arg to `get_pnl`** (`USD | EUR | GBP | HUF`, default `USD`). Mirrors the same pattern as `get_holdings`. When non-USD, every numeric field gets converted via live FX rates: `total.{currentValue, costBasis, unrealizedPnl, realizedPnl}`, `total.realizedFromHistory.knownRealized`, `total.windowDelta.{historicalValue, currentValueAtSnapshot, delta}` (deltaPercent stays untouched — it's a ratio), and per-account fields. Result type gains `currency` (echo) and optional `fx` block (`targetCurrency`, `source`, `rateUsdToTarget`, `fetchedAt`).
+- **`fmtPctChange()` formatter** in `src/mcp/apps/dashboard/iframe.ts` — signed percent for delta values (windowDelta change). Renders `+5.20%` / `-3.10%`. The signed/unsigned split is now explicit at the formatter level.
+
+### Changed
+
+- **`fmtPct()` in iframe.ts**: dropped the leading `+` for non-negative values. Allocation percentages (Top Positions table, Risk dimensions) now render as `52.09%` / `12.25%`, not `+52.09%`. Audit of all 6 callsites: 5 are allocations (correct unsigned now), 1 is windowDelta change percent (switched to `fmtPctChange`).
+- **Dashboard iframe `get_pnl` calls** now pass `currency` from the iframe's `currency` state. Both Portfolio tab (KPI: `Realized PnL (connector)`) and Weekly tab (windowDelta values) render in the user's chosen currency end-to-end.
+- **Tool description** for `get_pnl` mentions the new `currency` arg with the routing hint that consistent currency state requires passing it explicitly.
+- `SERVER_VERSION` 0.10.4 → 0.10.5; `package.json` bump.
+
+### Tests
+
+- 5 new tests in `test/mcp/tools/get_pnl.test.ts` for the currency path:
+  1. `currency='USD'` (default) → no FX fetch, no `fx` meta, USD values unchanged.
+  2. `currency='HUF'` converts ALL numeric fields (total + per-account) and populates `fx` meta with the right rate.
+  3. `currency='EUR'` does the EUR-specific math correctly.
+  4. `currency='HUF'` with `include_history=true` converts `realizedFromHistory.knownRealized` too.
+  5. FX fallback path (both upstream APIs fail) still produces a result with `fx.source: "fallback"`.
+- 243 → 248 tests, typecheck clean.
+
+### What this changes for the user
+
+- Dashboard in HUF: the `Realized PnL (connector)` KPI now shows the correctly-converted forint amount (e.g. -7.65M Ft instead of -24620 Ft).
+- Top Positions table: clean percentages without the noisy `+` prefix.
+- Weekly tab `% change`: still shows `+5.20%` / `-3.10%` style, since direction is meaningful there.
+
 ## v0.10.4 — 2026-05-03
 
 User feedback: on the first turn of a session, Claude Desktop showed two warmup tool calls before the actual `get_holdings`. The first attempt failed with "tool has not been loaded yet — call tool_search first to discover parameters." Then a `tool_search` round-trip loaded the schemas, and only then could `get_holdings` succeed. This is Claude Desktop's lazy schema-loading on a server with many tools — a real protocol cost.

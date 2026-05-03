@@ -349,6 +349,175 @@ describe("executeGetPnl", () => {
   });
 });
 
+// Currency conversion path. Uses fetch-mocking for the FX endpoints; doesn't
+// depend on PriceService since these tests don't set a timeframe (no
+// historical price fetches).
+describe("executeGetPnl — currency conversion", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test("currency='USD' (default) → no FX fetch, no fx meta, USD values unchanged", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    let fetchCalls = 0;
+    globalThis.fetch = (async (): Promise<Response> => {
+      fetchCalls++;
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([
+            makeHolding({
+              accountId: "bybit:UNIFIED",
+              symbol: "BTC",
+              quantity: 1,
+              avgCost: 25000,
+              currentPrice: 30000,
+              value: 30000,
+              metadata: { accountType: "UNIFIED", cumRealisedPnl: "-1000" },
+            }),
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({}, orch);
+    expect(fetchCalls).toBe(0);
+    expect(r.currency).toBe("USD");
+    expect(r.fx).toBeUndefined();
+    expect(r.total.currentValue).toBe(30000);
+    expect(r.total.realizedPnl).toBe(-1000);
+  });
+
+  test("currency='HUF' converts ALL numeric fields + populates fx meta", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify({ rates: { EUR: 0.92, GBP: 0.79, HUF: 380 } }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([
+            makeHolding({
+              accountId: "bybit:UNIFIED",
+              symbol: "BTC",
+              quantity: 1,
+              avgCost: 25000,
+              currentPrice: 30000,
+              value: 30000,
+              metadata: { accountType: "UNIFIED", cumRealisedPnl: "-1000" },
+            }),
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ currency: "HUF" }, orch);
+    expect(r.currency).toBe("HUF");
+    expect(r.fx).toBeDefined();
+    expect(r.fx!.targetCurrency).toBe("HUF");
+    expect(r.fx!.rateUsdToTarget).toBe(380);
+    // Value: 30000 USD × 380 = 11_400_000 HUF
+    expect(r.total.currentValue).toBe(30000 * 380);
+    // Cost basis: 1 × 25000 USD × 380 = 9_500_000 HUF
+    expect(r.total.costBasis).toBe(25000 * 380);
+    // Unrealized: 5000 USD × 380 = 1_900_000 HUF
+    expect(r.total.unrealizedPnl).toBe(5000 * 380);
+    // Realized: -1000 USD × 380 = -380_000 HUF
+    expect(r.total.realizedPnl).toBe(-1000 * 380);
+    // Per-account too
+    expect(r.byAccount[0]!.currentValue).toBe(30000 * 380);
+    expect(r.byAccount[0]!.realizedPnl).toBe(-1000 * 380);
+  });
+
+  test("currency='EUR' divides realized PnL by EUR rate", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify({ rates: { EUR: 0.92, GBP: 0.79, HUF: 380 } }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([
+            makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 1, value: 30000, metadata: { accountType: "UNIFIED", cumRealisedPnl: "-1000" } }),
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ currency: "EUR" }, orch);
+    expect(r.total.realizedPnl).toBeCloseTo(-1000 * 0.92, 4);
+  });
+
+  test("currency='HUF' + include_history=true converts realizedFromHistory.knownRealized too", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(
+        JSON.stringify({ rates: { EUR: 0.92, GBP: 0.79, HUF: 380 } }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "USDC", quantity: 50, value: 50, currentPrice: 1, avgCost: 1 })]),
+          transactionsResult: ok([
+            { accountId: "bybit:UNIFIED", txId: "buy1", type: "buy", symbol: "USDC", quantity: 100, price: 1.0, timestamp: 1000 },
+            { accountId: "bybit:UNIFIED", txId: "sell1", type: "sell", symbol: "USDC", quantity: 50, price: 1.05, timestamp: 2000 },
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ include_history: true, currency: "HUF" }, orch);
+    // Realized USD = 2.5; HUF = 2.5 × 380 = 950
+    expect(r.total.realizedFromHistory!.knownRealized).toBeCloseTo(2.5 * 380, 2);
+    expect(r.byAccount[0]!.realizedFromHistory!.knownRealized).toBeCloseTo(2.5 * 380, 2);
+  });
+
+  test("FX fallback path still produces a result (source: 'fallback' surfaced)", async () => {
+    setupAccount("bybit:UNIFIED", "bybit");
+    // Both upstream APIs fail → fx module returns hardcoded fallback rates.
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response("upstream broken", { status: 502 });
+    }) as unknown as typeof fetch;
+
+    const orch = new Orchestrator({
+      accountStore, cache, vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC", quantity: 1, value: 30000 })]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ currency: "HUF" }, orch);
+    expect(r.fx?.source).toBe("fallback");
+    expect(r.total.currentValue).toBe(30000 * 380); // hardcoded HUF fallback rate
+  });
+});
+
 // Time-windowed delta — uses a real PriceService with fetch mocked, plus a
 // fresh in-memory cache per test to keep historical-price cache hits isolated.
 describe("executeGetPnl — windowDelta (timeframe-driven)", () => {
