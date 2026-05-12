@@ -122,6 +122,13 @@ export function rateFromUsd(target: Currency, rates: FxRates): number {
 // Internal: timeout-bounded fetch returning Result<T>. Network-level errors
 // don't propagate — the orchestrator above tries the next source.
 async function tryFetch<T>(url: string, externalSignal?: AbortSignal): Promise<Result<T>> {
+  // Short-circuit if the caller already cancelled before we even start this attempt.
+  // Without this check, an already-aborted signal won't re-fire its "abort" event
+  // for a newly registered listener, causing the fetch to hang until FETCH_TIMEOUT_MS.
+  if (externalSignal?.aborted) {
+    return err("network_timeout", `${url} → aborted`);
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
