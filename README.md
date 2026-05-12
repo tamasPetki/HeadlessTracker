@@ -57,7 +57,7 @@ Either path (CLI or Settings UI) writes to the same `~/.headless-tracker/cache.d
 ### 1. Install
 
 ```bash
-git clone https://github.com/PietScarlet/headless-tracker.git
+git clone https://github.com/tamasPetki/HeadlessTracker.git
 cd headless-tracker
 bun install
 ```
