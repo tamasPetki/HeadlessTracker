@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: ROADMAP — what's planned and what's out of scope
+    url: https://github.com/tamasPetki/HeadlessTracker/blob/main/ROADMAP.md
+    about: Check here before opening a feature request.
