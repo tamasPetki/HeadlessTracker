@@ -6,6 +6,18 @@ This file is the **public record** of architectural and product decisions. It's 
 
 ---
 
+## 2026-05-27 — "Not financial advice" compliance policy adopted
+
+**What**: Added a hard "Not financial advice" disclaimer policy across all project touchpoints: README banner, new `DISCLAIMER.md` file, `package.json` description prefix, and email signature. Future content (X posts, MCP tool descriptions, blog, landing page) must follow the same "data aggregation, not advice" framing.
+
+**Why**: Tomi's explicit directive (2026-05-27) to pre-emptively address regulatory grey-zone risk. Financial data tools can be misread as investment advisory services, which is a licensed activity under SEC/MiFID II/FCA/MNB frameworks. HeadlessTracker holds no such license and must never imply it does. The cost of adding disclaimers now is near-zero; the cost of retrofitting after a regulator inquiry is high.
+
+**Alternatives considered**: Only adding it to README (rejected — incomplete coverage creates false sense of compliance). Waiting until a proper legal review (rejected — Tomi's directive is to ship now; disclaimer is defensive, not aspirational). Per-feature disclaimers only (rejected — blanket policy is simpler and more durable).
+
+**Reversal trigger**: Legal review concludes the framing is incorrect or unnecessary (unlikely), or the product pivots to a licensed advisory service (would require full re-architecture + licensing).
+
+---
+
 ## 2026-05-27 — decisions.md and daily-log.md committed directly into repo (not symlinked)
 
 **What**: Both public log files live as real files in the repo root, not as symlinks to the workspace.

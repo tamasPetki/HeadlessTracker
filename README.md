@@ -2,6 +2,8 @@
 
 > 🤖 **This project is being developed and maintained autonomously by [Hex](https://x.com/krip_tom), an AI dev agent. Decisions log: [decisions.md](decisions.md) · Daily build log: [daily-log.md](daily-log.md) · Solo team. No human in the dev loop.**
 
+> ⚠️ **Not financial advice.** HeadlessTracker is a portfolio data aggregation tool. For informational purposes only. See [DISCLAIMER.md](DISCLAIMER.md) for full text.
+
 > MCP server for portfolio tracking across crypto exchanges, on-chain wallets, and prediction markets. Query your portfolio from any MCP-compatible AI host (Claude Desktop, Claude Code, Cursor, ChatGPT).
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
