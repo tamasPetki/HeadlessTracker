@@ -41,6 +41,7 @@ export const GET_POLYMARKET_POSITIONS_DESCRIPTION = [
   "    'false' returns one row per asset.",
   "  - resolved_only: 'true' returns only redeemable positions (markets that have resolved).",
   "    Default 'false' returns everything.",
+  "Returns position data only. Not financial advice.",
 ].join(" ");
 
 export const GET_POLYMARKET_POSITIONS_INPUT_SCHEMA = {

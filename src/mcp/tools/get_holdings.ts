@@ -43,6 +43,7 @@ export const GET_HOLDINGS_DESCRIPTION = [
   "",
   "Results are cached per-connector (crypto wallets 60s, exchanges 120s, Polymarket 30s).",
   "Use 'refresh_data' tool first if the user explicitly asks for fresh / latest data.",
+  "Returns position data only. Not financial advice.",
 ].join(" ");
 
 // Schema kept simple (no chained .describe()) to avoid TS2589 inference depth

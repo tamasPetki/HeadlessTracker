@@ -46,10 +46,10 @@
     "name": "Tomi (PietScarlet)",
     "url": "https://bulltrapp.com"
   },
-  "homepage": "https://github.com/PietScarlet/headless-tracker",
+  "homepage": "https://github.com/tamasPetki/HeadlessTracker",
   "repository": {
     "type": "git",
-    "url": "https://github.com/PietScarlet/headless-tracker.git"
+    "url": "https://github.com/tamasPetki/HeadlessTracker.git"
   },
   "license": "MIT",
   "engines": {

@@ -39,6 +39,7 @@ export const GET_TRANSACTIONS_DESCRIPTION = [
   "  - Bybit: full transaction log",
   "  - MetaMask: native chain transfers + ERC-20 token transfers (USDC, USDT, etc.)",
   "  - Polymarket: BUY/SELL trades from the /trades endpoint (up to ~1000 most recent).",
+  "Returns transaction data only. Not financial advice.",
 ].join(" ");
 
 export const GET_TRANSACTIONS_INPUT_SCHEMA = {

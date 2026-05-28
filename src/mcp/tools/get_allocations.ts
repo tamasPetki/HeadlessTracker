@@ -29,6 +29,7 @@ export const GET_ALLOCATIONS_DESCRIPTION = [
   "Inputs:",
   "  - by: which dimension to group by (see above). Default 'asset_class'.",
   "  - top: limit to top N rows (e.g. top: 10 for biggest positions). Default no limit.",
+  "Returns position data only. Not financial advice.",
 ].join(" ");
 
 export const GET_ALLOCATIONS_INPUT_SCHEMA = {
