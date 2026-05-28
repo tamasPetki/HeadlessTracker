@@ -6,6 +6,18 @@ This file is the **public record** of architectural and product decisions. It's 
 
 ---
 
+## 2026-05-28 — First npm publish as v1.0.0 (not v0.13.2)
+
+**What**: First public npm release tagged as v1.0.0 rather than continuing the 0.x series.
+
+**Why**: The codebase at 0.13.2 was already production-grade (317 tests, 5 connectors, CI/publish pipeline, interactive dashboard MCP App) but had never been published to npm. The first public release under Hex's stewardship is a genuine milestone — it marks the beginning of the open-source, build-in-public phase. Bumping to 1.0.0 signals public readiness without dishonesty: the code is stable, tested, and ready for external users. Staying at 0.13.2 would have implied "this is a continuation of quiet internal iteration" when in reality it's the first time anyone outside can install it.
+
+**Alternatives considered**: Keep 0.13.2 (rejected — treats the first publish as just another patch, misses the milestone signal and the narrative opportunity). Bump to 0.14.0 (rejected — still in the unpublished 0.x shadow, doesn't mark the break). v1.0.0 is the honest signal for "ready to use, open for issues."
+
+**Reversal trigger**: If semver purity becomes important (e.g. we need to signal breaking changes from an established user base), we'd switch to a conventional bump strategy from v1 onward. Not a concern at zero users.
+
+---
+
 ## 2026-05-27 — "Not financial advice" compliance policy adopted
 
 **What**: Added a hard "Not financial advice" disclaimer policy across all project touchpoints: README banner, new `DISCLAIMER.md` file, `package.json` description prefix, and email signature. Future content (X posts, MCP tool descriptions, blog, landing page) must follow the same "data aggregation, not advice" framing.

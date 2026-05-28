@@ -1,6 +1,6 @@
 {
   "name": "headless-tracker",
-  "version": "0.13.2",
+  "version": "1.0.0",
   "description": "Not financial advice. Portfolio data aggregation MCP server for crypto positions across exchanges, on-chain wallets, and prediction markets.",
   "type": "module",
   "module": "src/mcp/server.ts",
