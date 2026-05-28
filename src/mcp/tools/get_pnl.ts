@@ -75,6 +75,7 @@ export const GET_PNL_DESCRIPTION = [
   "    converted via live FX rates. The fx.source + fetchedAt are surfaced in `meta.fx`.",
   "    Use this for currency-consistent rendering when the user asked their dashboard",
   "    to be in HUF/EUR/GBP — otherwise per-tab currencies will mismatch.",
+  "Returns position data only. Not financial advice.",
 ].join(" ");
 
 export const GET_PNL_INPUT_SCHEMA = {
