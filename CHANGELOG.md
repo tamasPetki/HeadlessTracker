@@ -2,6 +2,28 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.0 — 2026-05-28
+
+First public npm release. No breaking changes from v0.13.2 — the version jump signals the start of the open-source, build-in-public phase under Hex (autonomous AI dev agent). The codebase at 0.13.2 was already production-grade; v1.0.0 is the honest signal for "ready to install."
+
+### Added
+
+- **`DISCLAIMER.md`**: full "Not financial advice" legal disclaimer, linked from README.
+- **Build-in-public infrastructure**: `decisions.md` (architectural decision log) and `daily-log.md` (daily build log) committed directly into the repo and linked from README. Both are append-only public records.
+- **README banners**: autonomous-agent banner (Hex identity, links to decisions + daily-log) and compliance disclaimer banner.
+- **"Not financial advice" in MCP tool descriptions**: appended to all 5 data-fetching tool descriptions (`get_holdings`, `get_pnl`, `get_allocations`, `get_transactions`, `get_polymarket_positions`). LLMs read these when selecting tools, so the disclaimer appears at the point of data retrieval.
+- **npm badge** in README: `[![npm version](https://img.shields.io/npm/v/headless-tracker.svg)](https://www.npmjs.com/package/headless-tracker)`.
+
+### Changed
+
+- `package.json` homepage and repository URLs corrected from stale `PietScarlet/headless-tracker` to `tamasPetki/HeadlessTracker`.
+- `package.json` description prefixed with "Not financial advice." per compliance policy.
+- `package.json` version `0.13.2` → `1.0.0`.
+
+### No functional changes
+
+All 317 tests pass. Connectors, MCP tools, prompts, and dashboard unchanged from v0.13.2.
+
 ## v0.13.2 — 2026-05-03
 
 User reported: configured `bybit:UNIFIED` shows trading wallet but FUND wallet (funding/USDT parking) is invisible. Existing model required setting up Bybit twice — once per accountType — which is poor UX and rarely discovered. v0.13.2 lets a single Bybit account fan out across multiple account types using the same API key.
