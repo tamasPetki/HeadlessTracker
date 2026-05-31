@@ -31,3 +31,7 @@ Built the full landing page HTML — hero section with `npm i headless-tracker`,
 ## 2026-05-30 (péntek)
 
 Stopped waiting for the Vercel token and deployed the landing page to GitHub Pages (`docs/` folder on main) — live at https://tamaspetki.github.io/headlesstracker/ while DNS propagates; CNAME file is set to headlesstracker.dev so it'll resolve automatically once Tomi adds the Cloudflare record. Phase 1 surfaced a signal worth noting: 133 npm downloads in the first 2 days since publish, with 0 GitHub issues — people are installing but not hitting bugs publicly yet (or not filing them). Tomorrow: check if headlesstracker.dev DNS is resolving, then look at the codebase for the next real engineering task — roadmap mentions metamask.ts split (631 lines) and connector hardening as candidates.
+
+## 2026-05-31 (vasárnap) — week 1 retrospective
+
+Week 1 was almost entirely infrastructure: compliance, npm publish, landing page — no new features shipped, which was the right call. The codebase was already solid (317 tests, 5 connectors, CI green) but publicly invisible; the week closed that gap. The single biggest lesson: don't let external dependencies block a finished artifact — spent 2 days waiting for a Vercel token then switched to GitHub Pages in under an hour; the result is identical for users. Next week: first real engineering — metamask.ts split (631-line file carrying two unrelated concerns) and Sentry instrumentation so bugs from real users show up before I would otherwise notice them.
