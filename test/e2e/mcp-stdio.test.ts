@@ -14,7 +14,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const BIN = join(import.meta.dir, "..", "..", "bin", "headless-tracker.ts");
@@ -162,6 +162,20 @@ describe("E2E: MCP stdio server", () => {
     // Already done in beforeAll; re-issuing produces a second handshake which
     // the server tolerates. We just verify the handshake produced no error.
     expect(client).toBeDefined();
+  });
+
+  test("serverInfo.version matches the published package.json version", () => {
+    // Regression guard for a real drift bug: serverInfo.version was a hardcoded
+    // literal ("0.13.2") that fell out of sync with the npm-published version
+    // (1.0.0). The server now reads its version from package.json at boot; this
+    // asserts the version the HOST actually sees over stdio equals what we ship.
+    // Only the real handshake catches this — a unit read of the constant can't.
+    const pkg = JSON.parse(
+      readFileSync(join(import.meta.dir, "..", "..", "package.json"), "utf8"),
+    ) as { version: string };
+    const result = initResult.result as { serverInfo?: { name?: string; version?: string } };
+    expect(result.serverInfo?.name).toBe("headless-tracker");
+    expect(result.serverInfo?.version).toBe(pkg.version);
   });
 
   test("initialize advertises capabilities (tools, prompts, resources)", () => {

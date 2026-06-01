@@ -9,6 +9,9 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   GET_HOLDINGS_TOOL_NAME,
@@ -101,7 +104,22 @@ import {
 } from "./tools/token_admin.ts";
 
 const SERVER_NAME = "headless-tracker";
-const SERVER_VERSION = "0.13.2";
+
+// Single source of truth: read the version from package.json at boot so the
+// MCP server's reported version can never drift from the published npm version
+// again (it was pinned at a stale "0.13.2" while the package shipped 1.0.0).
+// Resolved relative to THIS source file so it works both from the dev tree
+// (src/mcp/server.ts) and when installed (node_modules/headless-tracker/...),
+// same depth-from-root idiom the MCP App registers use for their assets.
+const SERVER_VERSION: string = (() => {
+  try {
+    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json");
+    const { version } = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+    return version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 // Surfaces in the InitializeResult.instructions field, which Claude Desktop
 // (and most MCP hosts) inject into the system prompt. Cuts wasted tool_search
