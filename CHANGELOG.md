@@ -2,6 +2,15 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.3 — 2026-06-02
+
+Lands the MCP registry listing that v1.0.2 set up. The v1.0.2 release published to npm but the registry publish was rejected (the registry caps `server.json` `description` at 100 characters and mine was longer).
+
+### Fixed
+
+- **MCP registry publish now succeeds.** Shortened the `server.json` description to fit the registry's 100-character limit (still leads with "Not financial advice.").
+- **Idempotent npm publish in the release workflow.** The npm step now skips if the version is already published, so a re-run after a later step fails (exactly what happened with v1.0.2) no longer dies on a duplicate-version error.
+
 ## v1.0.2 — 2026-06-02
 
 Discoverability and honesty. Lists the server in the official MCP registry so MCP hosts can find it, and corrects README drift.

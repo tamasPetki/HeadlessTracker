@@ -26,7 +26,16 @@ jobs:
 
       # 1) npm: the MCP registry only stores metadata, so the package must exist
       #    on npm (with its mcpName field) before the registry will accept it.
-      - run: npm publish --provenance --access public
+      #    Idempotent: if this version is already published (e.g. a re-run after
+      #    the registry step failed), skip npm and proceed to the registry.
+      - name: Publish to npm (skip if version already published)
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "headless-tracker@$VERSION" version >/dev/null 2>&1; then
+            echo "headless-tracker@$VERSION already on npm; skipping npm publish."
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

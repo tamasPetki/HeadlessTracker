@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.tamasPetki/headless-tracker",
-  "description": "Not financial advice. Portfolio data aggregation MCP server for crypto positions across exchanges, on-chain wallets, and prediction markets.",
+  "description": "Not financial advice. Crypto portfolio aggregation across exchanges, wallets, prediction markets.",
   "repository": {
     "url": "https://github.com/tamasPetki/HeadlessTracker",
     "source": "github"
   },
-  "version": "1.0.2",
+  "version": "1.0.3",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "headless-tracker",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "transport": {
         "type": "stdio"
       }
