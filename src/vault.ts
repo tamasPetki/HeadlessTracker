@@ -15,7 +15,9 @@ function entryAccountName(connectorId: ConnectorId, accountIdentifier: string): 
   return `${connectorId}:${accountIdentifier}`;
 }
 
-function envVarName(connectorId: ConnectorId, accountIdentifier: string): string {
+// Exported so the setup flow can tell headless users (no OS keychain) exactly
+// which env var to set as the credential fallback.
+export function envVarName(connectorId: ConnectorId, accountIdentifier: string): string {
   // HEADLESS_TRACKER_BYBIT_UNIFIED, HEADLESS_TRACKER_METAMASK_0XABC...
   const safe = accountIdentifier.replace(/[^a-zA-Z0-9]/g, "_").toUpperCase();
   return `HEADLESS_TRACKER_${connectorId.toUpperCase()}_${safe}`;

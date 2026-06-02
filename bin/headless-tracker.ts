@@ -31,6 +31,7 @@ import { executeGetPnl } from "../src/mcp/tools/get_pnl.ts";
 import { executeGetTransactions } from "../src/mcp/tools/get_transactions.ts";
 import type { Account } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
+import { finalizeAccountSetup } from "../src/setup-finalize.ts";
 
 // Read from package.json (single source of truth) so the CLI banner can't drift
 // from the published version, same as the MCP server's reported version.
@@ -228,15 +229,7 @@ async function setupBybit(): Promise<void> {
     process.exit(1);
   }
 
-  const vault = defaultVault();
-  const setResult = await vault.set("bybit", accountType, fullCreds);
-  if (!setResult.ok) {
-    console.error(`Vault write failed: ${setResult.error.message}`);
-    process.exit(1);
-  }
-
   const allTypes = [accountType, ...extras];
-  const accounts = defaultAccountStore();
   const label = allTypes.length === 1 ? `Bybit ${accountType}` : `Bybit ${allTypes.join("+")}`;
   const account: Account = {
     id: `bybit:${accountType}`,
@@ -245,9 +238,10 @@ async function setupBybit(): Promise<void> {
     createdAt: Date.now(),
     metadata: { accountType, accountTypes: allTypes },
   };
-  accounts.upsert(account);
+  const fin = await finalizeAccountSetup(defaultVault(), defaultAccountStore(), "bybit", accountType, fullCreds, account);
 
   console.log(`\n✓ ${label} configured. Account ID: bybit:${accountType}`);
+  if (fin.warning) console.warn(`\n⚠  ${fin.warning}`);
   console.log("  Test it: ask Claude Desktop \"what's in my Bybit account?\"\n");
 }
 
@@ -320,21 +314,8 @@ async function setupMetaMask(): Promise<void> {
 
   // Account ID uses lowercased address (canonical form, avoids checksum mismatches).
   const accountIdentifier = address.toLowerCase();
+  const fullCreds = { address, etherscanApiKey, chainIds, trackCommonTokens, hasEtherscanPro };
 
-  const vault = defaultVault();
-  const setResult = await vault.set("metamask", accountIdentifier, {
-    address,
-    etherscanApiKey,
-    chainIds,
-    trackCommonTokens,
-    hasEtherscanPro,
-  });
-  if (!setResult.ok) {
-    console.error(`Vault write failed: ${setResult.error.message}`);
-    process.exit(1);
-  }
-
-  const accounts = defaultAccountStore();
   const labelShort = `${address.slice(0, 6)}...${address.slice(-4)}`;
   const chainNames = chainIds.map((id) => SUPPORTED_CHAINS[id as SupportedChainId].name).join(", ");
   const account: Account = {
@@ -349,10 +330,11 @@ async function setupMetaMask(): Promise<void> {
       hasEtherscanPro,
     },
   };
-  accounts.upsert(account);
+  const fin = await finalizeAccountSetup(defaultVault(), defaultAccountStore(), "metamask", accountIdentifier, fullCreds, account);
 
   console.log(`\n✓ MetaMask configured. Account ID: metamask:${accountIdentifier}`);
   console.log(`  Tracking: ${chainNames}`);
+  if (fin.warning) console.warn(`\n⚠  ${fin.warning}`);
   console.log("  Test it: ask Claude Desktop \"what's in my MetaMask wallet?\"\n");
 }
 
@@ -387,18 +369,8 @@ async function setupPolymarket(): Promise<void> {
   }
 
   const accountIdentifier = proxyWallet.toLowerCase();
+  const fullCreds = { proxyWallet, sizeThreshold };
 
-  const vault = defaultVault();
-  const setResult = await vault.set("polymarket", accountIdentifier, {
-    proxyWallet,
-    sizeThreshold,
-  });
-  if (!setResult.ok) {
-    console.error(`Vault write failed: ${setResult.error.message}`);
-    process.exit(1);
-  }
-
-  const accounts = defaultAccountStore();
   const labelShort = `${proxyWallet.slice(0, 6)}...${proxyWallet.slice(-4)}`;
   const account: Account = {
     id: `polymarket:${accountIdentifier}`,
@@ -407,9 +379,10 @@ async function setupPolymarket(): Promise<void> {
     createdAt: Date.now(),
     metadata: { proxyWallet, sizeThreshold },
   };
-  accounts.upsert(account);
+  const fin = await finalizeAccountSetup(defaultVault(), defaultAccountStore(), "polymarket", accountIdentifier, fullCreds, account);
 
   console.log(`\n✓ Polymarket configured. Account ID: polymarket:${accountIdentifier}`);
+  if (fin.warning) console.warn(`\n⚠  ${fin.warning}`);
   console.log("  Test it: ask Claude Desktop \"show my Polymarket positions\"\n");
 }
 
@@ -444,14 +417,6 @@ async function setupBinance(): Promise<void> {
 
   const fingerprint = apiKey.slice(0, 6);
   const accountIdentifier = `key-${fingerprint}`;
-  const vault = defaultVault();
-  const setResult = await vault.set("binance", accountIdentifier, fullCreds);
-  if (!setResult.ok) {
-    console.error(`Vault write failed: ${setResult.error.message}`);
-    process.exit(1);
-  }
-
-  const accounts = defaultAccountStore();
   const label = includeFutures
     ? `Binance Spot+Futures (${fingerprint}…)`
     : `Binance Spot (${fingerprint}…)`;
@@ -462,9 +427,10 @@ async function setupBinance(): Promise<void> {
     createdAt: Date.now(),
     metadata: { keyFingerprint: fingerprint, includeFutures },
   };
-  accounts.upsert(account);
+  const fin = await finalizeAccountSetup(defaultVault(), defaultAccountStore(), "binance", accountIdentifier, fullCreds, account);
 
   console.log(`\n✓ Binance configured. Account ID: binance:${accountIdentifier}`);
+  if (fin.warning) console.warn(`\n⚠  ${fin.warning}`);
   console.log("  Test it: ask Claude Desktop \"show my Binance holdings\"\n");
 }
 
@@ -505,14 +471,6 @@ async function setupSolana(): Promise<void> {
 
   // Solana addresses are case-sensitive base58 — keep as-is, no lowercase.
   const accountIdentifier = address;
-  const vault = defaultVault();
-  const setResult = await vault.set("solana", accountIdentifier, fullCreds);
-  if (!setResult.ok) {
-    console.error(`Vault write failed: ${setResult.error.message}`);
-    process.exit(1);
-  }
-
-  const accounts = defaultAccountStore();
   const labelShort = `${address.slice(0, 4)}…${address.slice(-4)}`;
   const account: Account = {
     id: `solana:${accountIdentifier}`,
@@ -521,9 +479,10 @@ async function setupSolana(): Promise<void> {
     createdAt: Date.now(),
     metadata: { address, rpcUrl, dustThresholdUsd },
   };
-  accounts.upsert(account);
+  const fin = await finalizeAccountSetup(defaultVault(), defaultAccountStore(), "solana", accountIdentifier, fullCreds, account);
 
   console.log(`\n✓ Solana configured. Account ID: solana:${accountIdentifier}`);
+  if (fin.warning) console.warn(`\n⚠  ${fin.warning}`);
   console.log("  Test it: ask Claude Desktop \"show my Solana holdings\"\n");
 }
 

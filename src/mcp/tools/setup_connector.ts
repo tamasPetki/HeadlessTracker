@@ -28,6 +28,7 @@ import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../.
 import { PolymarketConnector } from "../../connectors/polymarket.ts";
 import { SolanaConnector } from "../../connectors/solana.ts";
 import { defaultVault, type Vault } from "../../vault.ts";
+import { finalizeAccountSetup } from "../../setup-finalize.ts";
 import type { Account } from "../../types.ts";
 
 export const SETUP_CONNECTOR_TOOL_NAME = "setup_connector";
@@ -117,6 +118,8 @@ export interface SetupConnectorResult {
   accountId?: string;
   label?: string;
   error?: string;
+  /** Present when the account was registered but the OS keychain was unavailable; explains the env-var fallback. */
+  warning?: string;
 }
 
 export interface SetupConnectorDeps {
@@ -172,9 +175,6 @@ async function setupBybit(
   if (creds.accountTypes && creds.accountTypes.length > 0) {
     fullCreds.accountTypes = creds.accountTypes;
   }
-  const setResult = await vault.set("bybit", creds.accountType, fullCreds);
-  if (!setResult.ok) return { ok: false, error: `Vault write failed: ${setResult.error.message}` };
-
   // Account ID stays based on the primary type so existing v0.7-v0.13 vaults
   // round-trip cleanly. Label reflects the full fan-out so the user can see
   // what's being tracked at a glance.
@@ -192,8 +192,8 @@ async function setupBybit(
     createdAt: Date.now(),
     metadata: { accountType: creds.accountType, accountTypes: allTypes },
   };
-  store.upsert(account);
-  return { ok: true, accountId, label };
+  const fin = await finalizeAccountSetup(vault, store, "bybit", creds.accountType, fullCreds, account);
+  return { ok: fin.ok, accountId, label, warning: fin.warning };
 }
 
 async function setupMetaMask(
@@ -219,9 +219,6 @@ async function setupMetaMask(
   if (!validation.ok) return { ok: false, error: `MetaMask validation failed: ${validation.error.message}` };
 
   const accountIdentifier = creds.address.toLowerCase();
-  const setResult = await vault.set("metamask", accountIdentifier, fullCreds);
-  if (!setResult.ok) return { ok: false, error: `Vault write failed: ${setResult.error.message}` };
-
   const accountId = `metamask:${accountIdentifier}`;
   const labelShort = `${creds.address.slice(0, 6)}...${creds.address.slice(-4)}`;
   const chainNames = creds.chainIds
@@ -240,8 +237,8 @@ async function setupMetaMask(
       hasEtherscanPro: fullCreds.hasEtherscanPro,
     },
   };
-  store.upsert(account);
-  return { ok: true, accountId, label };
+  const fin = await finalizeAccountSetup(vault, store, "metamask", accountIdentifier, fullCreds, account);
+  return { ok: fin.ok, accountId, label, warning: fin.warning };
 }
 
 async function setupBinance(
@@ -265,9 +262,6 @@ async function setupBinance(
   // multiple Binance keys per user can coexist as separate Account rows.
   const fingerprint = creds.apiKey.slice(0, 6);
   const accountIdentifier = `key-${fingerprint}`;
-  const setResult = await vault.set("binance", accountIdentifier, fullCreds);
-  if (!setResult.ok) return { ok: false, error: `Vault write failed: ${setResult.error.message}` };
-
   const accountId = `binance:${accountIdentifier}`;
   const label = creds.includeFutures
     ? `Binance Spot+Futures (${fingerprint}…)`
@@ -282,8 +276,8 @@ async function setupBinance(
       includeFutures: fullCreds.includeFutures,
     },
   };
-  store.upsert(account);
-  return { ok: true, accountId, label };
+  const fin = await finalizeAccountSetup(vault, store, "binance", accountIdentifier, fullCreds, account);
+  return { ok: fin.ok, accountId, label, warning: fin.warning };
 }
 
 async function setupSolana(
@@ -300,9 +294,6 @@ async function setupSolana(
 
   // Solana addresses are case-sensitive base58 — do NOT lowercase like EVM.
   const accountIdentifier = creds.address;
-  const setResult = await vault.set("solana", accountIdentifier, fullCreds);
-  if (!setResult.ok) return { ok: false, error: `Vault write failed: ${setResult.error.message}` };
-
   const accountId = `solana:${accountIdentifier}`;
   const labelShort = `${creds.address.slice(0, 4)}…${creds.address.slice(-4)}`;
   const label = `Solana ${labelShort}`;
@@ -317,8 +308,8 @@ async function setupSolana(
       dustThresholdUsd: creds.dustThresholdUsd,
     },
   };
-  store.upsert(account);
-  return { ok: true, accountId, label };
+  const fin = await finalizeAccountSetup(vault, store, "solana", accountIdentifier, fullCreds, account);
+  return { ok: fin.ok, accountId, label, warning: fin.warning };
 }
 
 async function setupPolymarket(
@@ -332,9 +323,6 @@ async function setupPolymarket(
   if (!validation.ok) return { ok: false, error: `Polymarket validation failed: ${validation.error.message}` };
 
   const accountIdentifier = creds.proxyWallet.toLowerCase();
-  const setResult = await vault.set("polymarket", accountIdentifier, fullCreds);
-  if (!setResult.ok) return { ok: false, error: `Vault write failed: ${setResult.error.message}` };
-
   const accountId = `polymarket:${accountIdentifier}`;
   const labelShort = `${creds.proxyWallet.slice(0, 6)}...${creds.proxyWallet.slice(-4)}`;
   const label = `Polymarket ${labelShort}`;
@@ -345,6 +333,6 @@ async function setupPolymarket(
     createdAt: Date.now(),
     metadata: { proxyWallet: creds.proxyWallet, sizeThreshold: fullCreds.sizeThreshold },
   };
-  store.upsert(account);
-  return { ok: true, accountId, label };
+  const fin = await finalizeAccountSetup(vault, store, "polymarket", accountIdentifier, fullCreds, account);
+  return { ok: fin.ok, accountId, label, warning: fin.warning };
 }

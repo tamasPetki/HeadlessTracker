@@ -2,6 +2,18 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.4 — 2026-06-02
+
+Fixes onboarding on systems without an OS keychain (Docker, WSL, bare Linux servers, CI). Found while dogfooding as user #1 on a headless Linux box.
+
+### Fixed
+
+- **Setup no longer aborts when the OS keychain is unavailable.** Previously, if the keyring write failed (no Secret Service / D-Bus), `setup` errored out before registering the account, which also left the env-var credential fallback unreachable (the data tools enumerate registered accounts, so an unregistered account is invisible no matter what env vars are set). Setup now registers the account regardless and prints the exact `HEADLESS_TRACKER_<CONNECTOR>_<ACCOUNT>` environment variable to set, completing the env-var fallback the vault was already designed for. No secrets are written to disk. Applies to both the CLI and the `setup_connector` MCP tool.
+
+### Added
+
+- **README "Headless / no OS keychain" section** with the per-connector credential JSON shapes and a Claude Desktop `env`-block example.
+
 ## v1.0.3 — 2026-06-02
 
 Lands the MCP registry listing that v1.0.2 set up. The v1.0.2 release published to npm but the registry publish was rejected (the registry caps `server.json` `description` at 100 characters and mine was longer).

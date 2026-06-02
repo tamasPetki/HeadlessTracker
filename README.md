@@ -10,7 +10,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** Production-ready, live on npm (version badge above). 5 connectors (Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet), 15 MCP tools (6 data + 7 account/token management + 2 MCP App panels), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), live Settings MCP App for setup/admin, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko + Jupiter Price spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 318-test suite. Runs under plain Node (`npx headless-tracker`) or Bun. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** Production-ready, live on npm (version badge above). 5 connectors (Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet), 15 MCP tools (6 data + 7 account/token management + 2 MCP App panels), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), live Settings MCP App for setup/admin, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko + Jupiter Price spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 320-test suite. Runs under plain Node (`npx headless-tracker`) or Bun. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -85,6 +85,36 @@ bun run bin/headless-tracker.ts setup polymarket
 Verify what's configured:
 ```bash
 bun run bin/headless-tracker.ts list-accounts
+```
+
+#### Headless / no OS keychain (Docker, WSL, servers, CI)
+
+The OS keychain needs a running secret service (Secret Service / D-Bus on Linux, Keychain on macOS, Credential Vault on Windows). Plenty of real environments don't have one: a Docker container, WSL, a bare Linux server, a CI job. There, the keychain write fails.
+
+In that case `setup` does **not** abort. It still registers the account, then prints the exact environment variable to set, for example:
+
+```
+⚠  OS keychain unavailable, so credentials were NOT stored (...). The account is
+   registered. ... set the HEADLESS_TRACKER_SOLANA_<ADDR> environment variable to a
+   JSON object in your MCP server's env, then restart.
+```
+
+Set that variable to the connector's credential JSON in your MCP server's `env` block (or your shell), then restart. The env var always takes precedence over the keychain, so this also works as an explicit override. Per-connector JSON shapes (use **read-only** API keys — see the security note in the Settings panel section):
+
+| Connector | Env var (printed by `setup`) | JSON value |
+|-----------|------------------------------|------------|
+| Bybit | `HEADLESS_TRACKER_BYBIT_<ACCOUNTTYPE>` | `{"apiKey":"...","apiSecret":"...","accountType":"UNIFIED"}` |
+| Binance | `HEADLESS_TRACKER_BINANCE_KEY_<FIRST6>` | `{"apiKey":"...","apiSecret":"...","includeFutures":false}` |
+| MetaMask | `HEADLESS_TRACKER_METAMASK_0X<ADDR>` | `{"address":"0x...","etherscanApiKey":"...","chainIds":[1],"trackCommonTokens":true,"hasEtherscanPro":false}` |
+| Solana | `HEADLESS_TRACKER_SOLANA_<ADDR>` | `{"address":"<base58>"}` (optional `"rpcUrl"`, `"dustThresholdUsd"`) |
+| Polymarket | `HEADLESS_TRACKER_POLYMARKET_0X<ADDR>` | `{"proxyWallet":"0x...","sizeThreshold":0.01}` |
+
+The variable name is derived from the account identifier (`setup` prints the exact string, so you don't have to construct it by hand). Example for a Claude Desktop / MCP config `env` block:
+
+```json
+"env": {
+  "HEADLESS_TRACKER_SOLANA_<ADDR>": "{\"address\":\"<base58 address>\"}"
+}
 ```
 
 ### 3. Wire up Claude Desktop
