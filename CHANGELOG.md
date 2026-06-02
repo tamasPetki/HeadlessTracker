@@ -2,6 +2,18 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.2 — 2026-06-02
+
+Discoverability and honesty. Lists the server in the official MCP registry so MCP hosts can find it, and corrects README drift.
+
+### Added
+
+- **Official MCP registry listing.** Added `server.json` (`io.github.tamasPetki/headless-tracker`) and a registry-publish step to the release workflow using GitHub OIDC, so every tagged release now publishes to npm and to the MCP registry. The workflow syncs `server.json`'s version from the git tag, so it can't drift from the package version.
+
+### Fixed
+
+- **README tool count and stats.** It claimed "7 MCP tools" and a "307-test suite"; the server actually exposes 15 tools (6 data + 7 account/token management + 2 MCP App panels) and the suite is 318 tests. Added the missing tools to the documented tool tables, dropped the hardcoded `v1.0.0` status (the npm badge is the source of truth), and corrected the now-inaccurate `bun:sqlite`-only and "Bun process" references since the package runs under plain Node as of v1.0.1.
+
 ## v1.0.1 — 2026-06-02
 
 Runs under plain Node now. v1.0.0 shipped a `bun`-shebanged `.ts` entry and `bun:sqlite`, so `npx headless-tracker` on a machine without Bun failed instantly (`env: 'bun': No such file or directory`, and Node can't execute `.ts` or import `bun:sqlite`). This release makes the published binary Node-runnable while keeping Bun as the dev and test runtime.

@@ -10,7 +10,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** v1.0.0. 5 connectors (Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet), 7 MCP tools (6 data + `render_dashboard` MCP App), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), live Settings MCP App for setup/admin, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko + Jupiter Price spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 307-test suite. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** Production-ready, live on npm (version badge above). 5 connectors (Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet), 15 MCP tools (6 data + 7 account/token management + 2 MCP App panels), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), live Settings MCP App for setup/admin, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko + Jupiter Price spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 318-test suite. Runs under plain Node (`npx headless-tracker`) or Bun. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -242,12 +242,31 @@ To add a new connector, implement `Connector` from `src/connectors/types.ts` and
 | `get_allocations` | Group-by breakdown (asset class / connector / chain / symbol) | "how is my portfolio split", "biggest positions" |
 | `refresh_data` | Force cache invalidation | "refresh", "get the latest", "fetch now" |
 
-Each tool accepts an optional `account_id` filter (e.g. `metamask:0xabc...`, `bybit:UNIFIED`). Without a filter, tools query everything.
+The data tools accept an optional `account_id` filter (e.g. `metamask:0xabc...`, `bybit:UNIFIED`). Without a filter, they query everything.
+
+Account and setup management (all credential writes are read-only API keys stored in the OS keychain):
+
+| Tool | Purpose |
+|------|---------|
+| `setup_connector` | Configure a connector by writing read-only credentials to the OS keychain |
+| `list_accounts` | List configured accounts without exposing credentials |
+| `add_wallet_address` | Add another wallet address to an existing MetaMask or Solana account |
+| `remove_account` | Delete an account and its credentials from the keychain |
+| `add_custom_token` | Track a project-specific ERC-20 token on a MetaMask account |
+| `remove_custom_token` | Stop tracking a custom ERC-20 token (public on-chain data, no keychain) |
+| `list_custom_tokens` | List the custom ERC-20 tokens tracked per MetaMask account |
+
+MCP App panels (interactive UI rendered in the chat):
+
+| Tool | Purpose |
+|------|---------|
+| `render_dashboard` | Interactive dashboard panel: holdings, P&L, allocations, prediction markets |
+| `render_settings` | Settings panel: a GUI alternative to the CLI setup flow |
 
 ## Why local-first
 
 - **API keys never leave your machine.** Stored in your OS keychain via [`@napi-rs/keyring`](https://github.com/Brooooooklyn/keyring-node).
-- **Cache is local SQLite** (`bun:sqlite`). No server, no SaaS, no telemetry, no analytics pings.
+- **Cache is local SQLite** (the runtime's built-in driver: `node:sqlite` under Node, `bun:sqlite` under Bun). No server, no SaaS, no telemetry, no analytics pings.
 - **Read-only by design.** No transaction signing. Nothing this tool can do can lose your money.
 - **Per-connector cache TTL** (crypto wallets 60s, exchanges 120s, Polymarket 30s) keeps things fast without hammering upstream APIs.
 
@@ -256,18 +275,18 @@ Each tool accepts an optional `account_id` filter (e.g. `metamask:0xabc...`, `by
 ```
               ┌────────────────────────────┐
               │     headless-tracker       │
-              │       (Bun process)        │
+              │      (Node or Bun)         │
               │  ────────────────────────  │
               │  src/connectors/           │
               │    bybit.ts                │
               │    metamask.ts             │
               │    polymarket.ts           │
               │  src/types.ts (schema)     │
-              │  src/cache.ts (bun:sqlite) │
+              │  src/cache.ts (SQLite)     │
               │  src/vault.ts (keyring)    │
               │  src/accounts.ts (registry)│
               │  src/mcp/orchestrator.ts   │  ← parallel fan-out + in-flight Promise dedup
-              │  src/mcp/server.ts         │  ← McpServer + 6 tools
+              │  src/mcp/server.ts         │  ← McpServer + 15 tools
               │       ▲                    │
               │       │ stdio MCP          │
               └───────┼────────────────────┘

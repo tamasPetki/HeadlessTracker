@@ -1,4 +1,4 @@
-name: Publish to npm
+name: Publish (npm + MCP registry)
 
 on:
   push:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # for npm provenance
+      id-token: write   # npm provenance AND MCP registry GitHub OIDC
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -23,6 +23,33 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun --bun tsc --noEmit
       - run: bun test
+
+      # 1) npm: the MCP registry only stores metadata, so the package must exist
+      #    on npm (with its mcpName field) before the registry will accept it.
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # 2) MCP registry: list the server so MCP hosts can discover it.
+      #    GitHub OIDC proves ownership of the io.github.tamasPetki/* namespace
+      #    via this repo; no stored secret is needed.
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: Sync server.json version from the git tag
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp && mv server.tmp server.json
+          echo "server.json now at version $VERSION"
+      - name: Authenticate to MCP registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+      - name: Publish to MCP registry
+        run: |
+          # npm metadata can lag a few seconds behind `npm publish`; retry the
+          # registry's package-ownership validation before giving up.
+          for attempt in 1 2 3 4; do
+            if ./mcp-publisher publish; then exit 0; fi
+            echo "mcp-publisher attempt $attempt failed; waiting 20s..."
+            sleep 20
+          done
+          exit 1

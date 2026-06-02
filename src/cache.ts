@@ -125,10 +125,10 @@ export class Cache {
     this.db.close();
   }
 
-  // SQLITE_BUSY retry loop. better-sqlite3 throws SqliteError with code
-  // "SQLITE_BUSY" (or message "database is locked") when a write conflicts;
-  // busy_timeout above usually handles this but the explicit retry is
-  // belt-and-suspenders for high MCP fan-out scenarios.
+  // SQLITE_BUSY retry loop. Both engines throw an Error mentioning "SQLITE_BUSY"
+  // (or "database is locked") when a write conflicts; busy_timeout above usually
+  // handles this but the explicit retry is belt-and-suspenders for high MCP
+  // fan-out scenarios.
   private runWithRetry(fn: () => void): void {
     let lastError: unknown;
     for (let attempt = 0; attempt <= SQLITE_BUSY_RETRIES; attempt++) {
