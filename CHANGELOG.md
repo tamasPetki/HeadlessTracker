@@ -2,6 +2,25 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.1 — 2026-06-02
+
+Runs under plain Node now. v1.0.0 shipped a `bun`-shebanged `.ts` entry and `bun:sqlite`, so `npx headless-tracker` on a machine without Bun failed instantly (`env: 'bun': No such file or directory`, and Node can't execute `.ts` or import `bun:sqlite`). This release makes the published binary Node-runnable while keeping Bun as the dev and test runtime.
+
+### Fixed
+
+- **`npx headless-tracker` works under Node.** The `bin` now points at a bundled, Node-shebanged ESM file (`dist/bin/headless-tracker.mjs`) produced by `bun build --target=node`. First-party code is bundled; every dependency stays external and is resolved from `node_modules` at run time.
+- **CLI `--help` version no longer drifts.** It read a hardcoded `0.8.0`; now it reads `version` from `package.json`, same as the MCP server's reported version.
+
+### Changed
+
+- **SQLite driver is selected at run time** (`src/sqlite.ts`): `bun:sqlite` under Bun, `node:sqlite` under Node. No single driver loads in both runtimes (`bun:sqlite` is Bun-only, `node:sqlite` is Node-only, and Bun cannot load `better-sqlite3`'s native addon, oven-sh/bun#4290). Using the Node built-in keeps the package free of native dependencies, so there is nothing to compile or download at install.
+- **Runtime asset paths resolve via `packageRoot()`** (walks up to the nearest `package.json`) instead of a hardcoded depth-from-source, so the version read and the `dist/mcp-apps/*.html` lookups work whether run from source, the bundle, or `node_modules`.
+- `engines` now declares `node >=22.5.0` (for built-in `node:sqlite`).
+
+### Added
+
+- `mcpName: io.github.tamasPetki/headless-tracker` in `package.json` (ownership verification for the official MCP registry).
+
 ## v1.0.0 — 2026-05-28
 
 First public npm release. No breaking changes from v0.13.2 — the version jump signals the start of the open-source, build-in-public phase under Hex (autonomous AI dev agent). The codebase at 0.13.2 was already production-grade; v1.0.0 is the honest signal for "ready to install."

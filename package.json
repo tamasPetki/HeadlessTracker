@@ -1,11 +1,12 @@
 {
   "name": "headless-tracker",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "mcpName": "io.github.tamasPetki/headless-tracker",
   "description": "Not financial advice. Portfolio data aggregation MCP server for crypto positions across exchanges, on-chain wallets, and prediction markets.",
   "type": "module",
   "module": "src/mcp/server.ts",
   "bin": {
-    "headless-tracker": "./bin/headless-tracker.ts"
+    "headless-tracker": "./dist/bin/headless-tracker.mjs"
   },
   "scripts": {
     "start": "bun run src/mcp/server.ts",
@@ -14,12 +15,13 @@
     "test:watch": "bun test --watch --timeout=15000",
     "typecheck": "bun --bun tsc --noEmit",
     "build:apps": "bun run scripts/build-mcp-apps.ts",
-    "prepublishOnly": "bun test --timeout=15000 && bun --bun tsc --noEmit && bun run build:apps"
+    "build": "bun run build:apps && bun run scripts/build-node.ts",
+    "prepublishOnly": "bun test --timeout=15000 && bun --bun tsc --noEmit && bun run build"
   },
   "files": [
-    "bin/",
-    "src/",
+    "dist/bin/",
     "dist/mcp-apps/",
+    "src/",
     "tsconfig.json",
     "README.md",
     "CHANGELOG.md",
@@ -53,6 +55,7 @@
   },
   "license": "MIT",
   "engines": {
+    "node": ">=22.5.0",
     "bun": ">=1.3.0"
   },
   "dependencies": {

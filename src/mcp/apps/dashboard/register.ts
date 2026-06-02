@@ -17,19 +17,18 @@ import {
 } from "@modelcontextprotocol/ext-apps/server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { z } from "zod";
+
+import { packageRoot } from "../../../package-root.ts";
 
 export const DASHBOARD_TOOL_NAME = "render_dashboard";
 export const DASHBOARD_RESOURCE_URI = "ui://headless-tracker/dashboard";
 
-// Resolve the bundled HTML relative to THIS source file. Works whether the
-// package is run via `bun run` from the dev tree or installed via `bunx` —
-// both keep src/mcp/apps/dashboard/register.ts at the same depth from the
-// dist/mcp-apps/dashboard.html artifact.
-const HERE = dirname(fileURLToPath(import.meta.url));
-const BUNDLED_HTML_PATH = join(HERE, "..", "..", "..", "..", "dist", "mcp-apps", "dashboard.html");
+// Resolve the bundled HTML under the package root. packageRoot() walks up to
+// the nearest package.json, so this holds for the dev tree, the node bundle
+// (dist/bin/), and an installed node_modules/headless-tracker/.
+const BUNDLED_HTML_PATH = join(packageRoot(), "dist", "mcp-apps", "dashboard.html");
 
 let cachedHtml: string | null = null;
 async function loadHtml(): Promise<string> {

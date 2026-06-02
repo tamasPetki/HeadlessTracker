@@ -5,7 +5,7 @@
 //   - MCP tools when called without an account_id filter (iterate all accounts)
 //   - Setup flow (writes a new row alongside the vault credential write)
 
-import { Database } from "bun:sqlite";
+import { openDatabase, type SqliteDb } from "./sqlite.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
@@ -28,14 +28,14 @@ interface AccountRow {
 }
 
 export class AccountStore {
-  private db: Database;
+  private db: SqliteDb;
 
   constructor(opts: AccountStoreOptions = {}) {
     const path = opts.dbPath ?? DEFAULT_DB_PATH;
     if (path !== ":memory:") {
       mkdirSync(DEFAULT_DB_DIR, { recursive: true });
     }
-    this.db = new Database(path, { create: true });
+    this.db = openDatabase(path);
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA synchronous = NORMAL");
     this.db.exec("PRAGMA busy_timeout = 5000");
@@ -68,28 +68,28 @@ export class AccountStore {
 
   get(id: string): Account | null {
     const row = this.db
-      .query<AccountRow, [string]>("SELECT * FROM accounts WHERE id = ?")
-      .get(id);
+      .prepare("SELECT * FROM accounts WHERE id = ?")
+      .get(id) as AccountRow | undefined;
     return row ? rowToAccount(row) : null;
   }
 
   list(): Account[] {
-    const rows = this.db.query<AccountRow, []>("SELECT * FROM accounts ORDER BY created_at ASC").all();
+    const rows = this.db
+      .prepare("SELECT * FROM accounts ORDER BY created_at ASC")
+      .all() as AccountRow[];
     return rows.map(rowToAccount);
   }
 
   listByConnector(connectorId: ConnectorId): Account[] {
     const rows = this.db
-      .query<AccountRow, [string]>(
-        "SELECT * FROM accounts WHERE connector_id = ? ORDER BY created_at ASC"
-      )
-      .all(connectorId);
+      .prepare("SELECT * FROM accounts WHERE connector_id = ? ORDER BY created_at ASC")
+      .all(connectorId) as AccountRow[];
     return rows.map(rowToAccount);
   }
 
   remove(id: string): boolean {
     const result = this.db.prepare("DELETE FROM accounts WHERE id = ?").run(id);
-    return result.changes > 0;
+    return Number(result.changes) > 0;
   }
 
   close(): void {

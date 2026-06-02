@@ -1,13 +1,24 @@
 // Local SQLite cache for connector responses.
 // Eng review F4 critical gap: WAL mode + retry-on-SQLITE_BUSY for concurrent MCP tool calls.
 // Eng review 1F: per-connector default TTL, callers can override.
+//
+// SQLite driver is chosen at runtime by ./sqlite.ts (bun:sqlite under Bun,
+// node:sqlite under Node) so the published package runs under plain Node
+// (`npx headless-tracker`) as well as Bun. bun:sqlite alone silently broke
+// every node-only install.
 
-import { Database } from "bun:sqlite";
+import { openDatabase, type SqliteDb } from "./sqlite.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 
 import type { ConnectorId } from "./types.ts";
+
+// Synchronous sleep that works under both Node and Bun (replaces Bun.sleepSync).
+// Blocks the calling thread for `ms` via Atomics.wait on a throwaway buffer.
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 const DEFAULT_DB_DIR = join(homedir(), ".headless-tracker");
 const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, "cache.db");
@@ -38,14 +49,14 @@ export interface CacheOptions {
 }
 
 export class Cache {
-  private db: Database;
+  private db: SqliteDb;
 
   constructor(opts: CacheOptions = {}) {
     const path = opts.dbPath ?? DEFAULT_DB_PATH;
     if (path !== ":memory:") {
       mkdirSync(DEFAULT_DB_DIR, { recursive: true });
     }
-    this.db = new Database(path, { create: true });
+    this.db = openDatabase(path);
 
     // WAL mode: concurrent readers + serialized writers, far better SQLite concurrency
     // than the default rollback journal. Critical when MCP host fans out tool calls.
@@ -67,11 +78,8 @@ export class Cache {
 
   get<T>(connector: ConnectorId | string, key: string): { value: T; storedAt: number; stale: boolean } | null {
     const row = this.db
-      .query<
-        { value: string; stored_at: number; expires_at: number },
-        [string, string]
-      >("SELECT value, stored_at, expires_at FROM cache_entries WHERE connector = ? AND key = ?")
-      .get(connector, key);
+      .prepare("SELECT value, stored_at, expires_at FROM cache_entries WHERE connector = ? AND key = ?")
+      .get(connector, key) as { value: string; stored_at: number; expires_at: number } | undefined;
 
     if (!row) return null;
 
@@ -117,9 +125,10 @@ export class Cache {
     this.db.close();
   }
 
-  // SQLITE_BUSY retry loop. Bun's sqlite throws an Error with code "SQLITE_BUSY"
-  // when a write conflicts; busy_timeout above usually handles this but the explicit
-  // retry is belt-and-suspenders for high MCP fan-out scenarios.
+  // SQLITE_BUSY retry loop. better-sqlite3 throws SqliteError with code
+  // "SQLITE_BUSY" (or message "database is locked") when a write conflicts;
+  // busy_timeout above usually handles this but the explicit retry is
+  // belt-and-suspenders for high MCP fan-out scenarios.
   private runWithRetry(fn: () => void): void {
     let lastError: unknown;
     for (let attempt = 0; attempt <= SQLITE_BUSY_RETRIES; attempt++) {
@@ -134,7 +143,7 @@ export class Cache {
         if (!isBusy || attempt === SQLITE_BUSY_RETRIES) {
           throw e;
         }
-        Bun.sleepSync(SQLITE_BUSY_BACKOFF_MS * (attempt + 1));
+        sleepSync(SQLITE_BUSY_BACKOFF_MS * (attempt + 1));
       }
     }
     throw lastError;

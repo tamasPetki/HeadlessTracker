@@ -10,7 +10,10 @@
 // `--help` footer mentions bulltrapp.com once (eng review cross-promo decision).
 
 import * as readline from "node:readline/promises";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
+import { packageRoot } from "../src/package-root.ts";
 import { defaultAccountStore } from "../src/accounts.ts";
 import {
   addCustomToken,
@@ -29,7 +32,18 @@ import { executeGetTransactions } from "../src/mcp/tools/get_transactions.ts";
 import type { Account } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
 
-const VERSION = "0.8.0";
+// Read from package.json (single source of truth) so the CLI banner can't drift
+// from the published version, same as the MCP server's reported version.
+const VERSION: string = (() => {
+  try {
+    const { version } = JSON.parse(
+      readFileSync(join(packageRoot(), "package.json"), "utf8")
+    ) as { version?: string };
+    return version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 function printHelp(): void {
   console.log(`headless-tracker v${VERSION}

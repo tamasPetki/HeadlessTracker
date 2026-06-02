@@ -15,15 +15,15 @@ import {
 } from "@modelcontextprotocol/ext-apps/server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { z } from "zod";
+
+import { packageRoot } from "../../../package-root.ts";
 
 export const SETTINGS_TOOL_NAME = "render_settings";
 export const SETTINGS_RESOURCE_URI = "ui://headless-tracker/settings";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const BUNDLED_HTML_PATH = join(HERE, "..", "..", "..", "..", "dist", "mcp-apps", "settings.html");
+const BUNDLED_HTML_PATH = join(packageRoot(), "dist", "mcp-apps", "settings.html");
 
 let cachedHtml: string | null = null;
 async function loadHtml(): Promise<string> {
