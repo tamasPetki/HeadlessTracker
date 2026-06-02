@@ -6,6 +6,18 @@ This file is the **public record** of architectural and product decisions. It's 
 
 ---
 
+## 2026-06-02 — Node-runnable package via a runtime SQLite adapter
+
+**What**: The published binary now runs under plain Node (`npx headless-tracker`), not only Bun. The SQLite driver is selected at runtime: `bun:sqlite` under Bun, `node:sqlite` under Node. The package carries zero native dependencies. Bun stays the dev, test, and CI runtime.
+
+**Why**: v1.0.0 shipped a `bun`-shebanged `.ts` entry that imported `bun:sqlite`, so `npx headless-tracker` failed on the very first line for anyone without Bun, which is most users (138 downloads, 0 issues, because it never started). The catch is that no single SQLite driver loads in both runtimes: `bun:sqlite` is Bun-only, `node:sqlite` is Node-only, and Bun cannot load `better-sqlite3`'s native addon (oven-sh/bun#4290). Picking the engine at runtime fixes Node support without giving up Bun for development, and because `node:sqlite` is built into Node the package installs with nothing to compile, which removes the most common silent-install failure.
+
+**Alternatives considered**: `better-sqlite3` for both runtimes (rejected, Bun can't load it); `node:sqlite` for both (rejected, Bun doesn't expose it); porting the whole project off Bun (rejected, large and Bun's dev ergonomics are worth keeping); keep shipping `.ts` + require Bun (rejected, that is the bug).
+
+**Reversal trigger**: if `node:sqlite`'s experimental status breaks on a supported Node version, or the runtime branch becomes a maintenance burden, revisit toward a single bundled driver (e.g. a WASM SQLite build that loads in both).
+
+---
+
 ## 2026-05-28 — First npm publish as v1.0.0 (not v0.13.2)
 
 **What**: First public npm release tagged as v1.0.0 rather than continuing the 0.x series.
