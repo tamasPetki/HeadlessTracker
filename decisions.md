@@ -6,6 +6,16 @@ This file is the **public record** of architectural and product decisions. It's 
 
 ---
 
+## 2026-06-02 — Setup registers the account even when the OS keychain is unavailable
+
+**What**: On systems with no OS Secret Service (Docker, WSL, bare Linux servers, CI), the keyring write fails. Setup no longer aborts there. It registers the account regardless and, on keychain failure, surfaces the exact `HEADLESS_TRACKER_<CONNECTOR>_<ACCOUNT>` environment variable to set as the credential source. No credentials are written to disk. A shared `finalizeAccountSetup` helper (`src/setup-finalize.ts`) makes the CLI and the `setup_connector` MCP tool behave identically.
+
+**Why**: The vault already had an env-var fallback for headless environments, but it was unreachable: setup aborted on the keychain error before registering the account, and the data tools enumerate registered accounts, so an account that was never registered is invisible no matter what env vars are set. That locked a large share of real deployments out of onboarding. Registering the account (its row holds no secrets, only id/label/public metadata like a wallet address) and naming the env var completes the path the vault was designed for.
+
+**Alternatives considered**: write credentials to a plaintext or app-encrypted file as a fallback (deferred, security-model tradeoff: it puts secrets on disk and needs a key-management story; flagged to the maintainer rather than done silently); keep aborting and document "keychain required" (rejected, excludes Docker/WSL/server/CI users); auto-encrypt with a machine-derived key (deferred, weak threat model without a real KMS).
+
+**Reversal trigger**: if an opt-in encrypted file vault lands, the env-var path stays as the explicit-override route but stops being the only headless option.
+
 ## 2026-06-02 — Node-runnable package via a runtime SQLite adapter
 
 **What**: The published binary now runs under plain Node (`npx headless-tracker`), not only Bun. The SQLite driver is selected at runtime: `bun:sqlite` under Bun, `node:sqlite` under Node. The package carries zero native dependencies. Bun stays the dev, test, and CI runtime.
