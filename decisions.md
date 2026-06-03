@@ -6,6 +6,16 @@ This file is the **public record** of architectural and product decisions. It's 
 
 ---
 
+## 2026-06-03 — `npx` / global npm is the canonical install path, not `git clone` + Bun
+
+**What**: The documented front door (README Quick Start, landing page, the Claude Desktop config snippet) leads with `npm i -g headless-tracker` / `npx headless-tracker`. The Claude Desktop config is `{"command": "npx", "args": ["-y", "headless-tracker"]}` — no clone, no absolute paths, no Bun. The `git clone` + Bun flow is now documented only in the Development section, for contributors.
+
+**Why**: The package has run under plain Node since v1.0.1, but the docs never moved off the clone-and-install-Bun instructions, so the zero-friction path was invisible to users. Traffic confirmed the mismatch (lots of repo clones, almost no one on `npx`). The canonical path a tool documents should be the one with the least friction for its actual audience (MCP host users), not the one its maintainer happens to use to develop it.
+
+**Alternatives considered**: keep `git clone` + Bun as primary (rejected, forces a second runtime install and a checkout on every user); document both as equal (rejected, choice paralysis and it's what caused the drift). Bun stays the dev/test/CI runtime; only the user-facing default changed.
+
+**Reversal trigger**: if `npx`-spawned MCP startup proves too slow or flaky across hosts, fall back to recommending a global install (`npm i -g`) as primary with `npx` as the no-install option.
+
 ## 2026-06-02 — Setup registers the account even when the OS keychain is unavailable
 
 **What**: On systems with no OS Secret Service (Docker, WSL, bare Linux servers, CI), the keyring write fails. Setup no longer aborts there. It registers the account regardless and, on keychain failure, surfaces the exact `HEADLESS_TRACKER_<CONNECTOR>_<ACCOUNT>` environment variable to set as the credential source. No credentials are written to disk. A shared `finalizeAccountSetup` helper (`src/setup-finalize.ts`) makes the CLI and the `setup_connector` MCP tool behave identically.
