@@ -57,6 +57,7 @@ Usage:
   headless-tracker show pnl [...]         Print aggregate P&L
   headless-tracker show transactions [..] Print transaction history
   headless-tracker token <add|list|rm>    Manage custom ERC-20 token list (per MetaMask account/chain)
+  headless-tracker version                Print the version
   headless-tracker help                   Show this help
 
 Connectors: bybit, binance, metamask, polymarket, solana
@@ -884,6 +885,11 @@ async function main(): Promise<void> {
     case "--help":
     case "-h":
       printHelp();
+      return;
+    case "version":
+    case "--version":
+    case "-v":
+      console.log(`headless-tracker v${VERSION}`);
       return;
     case "setup":
       return setup(args[1]);

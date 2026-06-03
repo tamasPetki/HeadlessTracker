@@ -2,6 +2,19 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.5 — 2026-06-03
+
+Makes the docs match the capability shipped in v1.0.1. The package has run under plain Node (`npx headless-tracker`) since v1.0.1, but the README's Quick Start still told everyone to `git clone` + install Bun, and the Claude Desktop config still pointed at a local Bun clone with absolute paths. The traffic told the story: lots of repo clones, almost no one using the zero-friction path that already existed.
+
+### Changed
+
+- **README leads with `npx` / global install, not a Bun clone.** Quick Start is now `npm i -g headless-tracker` (or prefix `npx`), and the Claude Desktop config is just `{"command": "npx", "args": ["-y", "headless-tracker"]}` — no absolute paths, no clone, no Bun. The `git clone` + Bun path moved to the Development section where it belongs.
+- **Landing page no longer claims "Requires Bun 1.3+"** for end users (it runs under Node 22.5+).
+
+### Added
+
+- **`headless-tracker version` (`--version` / `-v`).** Previously only `help` printed the version; `--version` fell through to "unknown command".
+
 ## v1.0.4 — 2026-06-02
 
 Fixes onboarding on systems without an OS keychain (Docker, WSL, bare Linux servers, CI). Found while dogfooding as user #1 on a headless Linux box.

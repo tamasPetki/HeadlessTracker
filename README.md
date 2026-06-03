@@ -10,7 +10,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** Production-ready, live on npm (version badge above). 5 connectors (Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet), 15 MCP tools (6 data + 7 account/token management + 2 MCP App panels), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), live Settings MCP App for setup/admin, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko + Jupiter Price spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 320-test suite. Runs under plain Node (`npx headless-tracker`) or Bun. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** Production-ready, live on npm (version badge above). 5 connectors (Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet), 15 MCP tools (6 data + 7 account/token management + 2 MCP App panels), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), live Settings MCP App for setup/admin, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko + Jupiter Price spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 323-test suite. Runs under plain Node (`npx headless-tracker`) or Bun. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 
 ## What it does
 
@@ -39,7 +39,7 @@ Plus a currency switcher (USD / EUR / GBP / HUF) and a refresh button. The ifram
 
 > Open the dashboard in HUF, weekly tab
 
-Implementation: `src/mcp/apps/dashboard/` (browser-side TS bundled into a single `dist/mcp-apps/dashboard.html` via `bun run build:apps`, ships with the package). The bundled artifact is committed so users running `bunx headless-tracker` don't need a build step.
+Implementation: `src/mcp/apps/dashboard/` (browser-side TS bundled into a single `dist/mcp-apps/dashboard.html` via `bun run build:apps`, ships with the package). The bundled artifact ships inside the npm package so users running `npx headless-tracker` don't need a build step.
 
 If your host doesn't render MCP Apps yet, the `render_dashboard` tool still returns a textual confirmation. Use the [prompt cookbook](#prompt-cookbook) below as a fallback — same workflows, same data, just no live UI panel.
 
@@ -62,29 +62,29 @@ Either path (CLI or Settings UI) writes to the same `~/.headless-tracker/cache.d
 
 ### 1. Install
 
+No clone, no build step, no Bun required. The package runs under plain Node (≥ 22.5) or Bun. Install it globally:
+
 ```bash
-git clone https://github.com/tamasPetki/HeadlessTracker.git
-cd headless-tracker
-bun install
+npm install -g headless-tracker
 ```
 
-Requires [Bun 1.3+](https://bun.sh).
+Or run any command without installing by prefixing `npx`, e.g. `npx headless-tracker setup solana`. (Building from source for development uses Bun — see [Development](#development).)
 
 ### 2. Configure your accounts (interactive)
 
-Run setup for each integration you want. Each prompts for credentials, validates them, and stores them in your OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Vault).
+Run setup for each integration you want. Each prompts for credentials, validates them, and stores them in your OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Vault). On a headless box with no keychain, see [Headless / no OS keychain](#headless--no-os-keychain-docker-wsl-servers-ci) below.
 
 ```bash
-bun run bin/headless-tracker.ts setup bybit
-bun run bin/headless-tracker.ts setup binance
-bun run bin/headless-tracker.ts setup metamask
-bun run bin/headless-tracker.ts setup solana
-bun run bin/headless-tracker.ts setup polymarket
+headless-tracker setup bybit
+headless-tracker setup binance
+headless-tracker setup metamask
+headless-tracker setup solana
+headless-tracker setup polymarket
 ```
 
 Verify what's configured:
 ```bash
-bun run bin/headless-tracker.ts list-accounts
+headless-tracker list-accounts
 ```
 
 #### Headless / no OS keychain (Docker, WSL, servers, CI)
@@ -119,20 +119,20 @@ The variable name is derived from the account identifier (`setup` prints the exa
 
 ### 3. Wire up Claude Desktop
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Edit your `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`):
 
 ```json
 {
   "mcpServers": {
     "headless-tracker": {
-      "command": "/path/to/bun",
-      "args": ["run", "/absolute/path/to/headless-tracker/bin/headless-tracker.ts"]
+      "command": "npx",
+      "args": ["-y", "headless-tracker"]
     }
   }
 }
 ```
 
-Replace `/path/to/bun` with the output of `which bun` and the project path with your clone location.
+That's the whole config: no absolute paths, no clone location, no Bun. `npx -y headless-tracker` with no subcommand starts the MCP server over stdio (npx caches after the first run). If you installed globally with `npm i -g headless-tracker`, you can use `"command": "headless-tracker"` with no `args` instead.
 
 Restart Claude Desktop (Cmd+Q, then reopen — the in-app "new conversation" doesn't reload config).
 
@@ -195,9 +195,9 @@ Copy-paste these into any MCP-aware client. Each one expects the headless-tracke
 For the 3-second "what's in my portfolio?" question without opening Claude Desktop:
 
 ```bash
-bun run bin/headless-tracker.ts show holdings
-bun run bin/headless-tracker.ts show pnl
-bun run bin/headless-tracker.ts show transactions --since=7d
+headless-tracker show holdings
+headless-tracker show pnl
+headless-tracker show transactions --since=7d
 ```
 
 Each prints a text table. Filters work: `show holdings --account-id=bybit:UNIFIED`, `show holdings --asset-class=crypto`, `show transactions --since=24h --account-id=metamask:0xabc`.
@@ -207,8 +207,8 @@ Each prints a text table. Filters work: `show holdings --account-id=bybit:UNIFIE
 `show holdings` defaults to USD. Pass `--currency=` for live FX-converted values:
 
 ```bash
-bun run bin/headless-tracker.ts show holdings --currency=HUF
-bun run bin/headless-tracker.ts show holdings --currency=EUR
+headless-tracker show holdings --currency=HUF
+headless-tracker show holdings --currency=EUR
 ```
 
 FX rates come from a free public API (`exchangerate-api.com`) with `frankfurter.dev` as fallback, plus a static fallback if both fail (which surfaces as a warning so you know the displayed numbers may be a few percent stale). Supported: `USD`, `EUR`, `GBP`, `HUF`.
@@ -218,8 +218,8 @@ FX rates come from a free public API (`exchangerate-api.com`) with `frankfurter.
 For honest realized P&L based on your transaction history (not connector metadata which can mix realized + unrealized for prediction markets):
 
 ```bash
-bun run bin/headless-tracker.ts show pnl --include-history=true
-bun run bin/headless-tracker.ts show pnl --include-history=true --method=average
+headless-tracker show pnl --include-history=true
+headless-tracker show pnl --include-history=true --method=average
 ```
 
 `--method=fifo` (default): consumes the oldest lot first per sell.
@@ -230,9 +230,9 @@ Both methods preserve the "honest unknown" rule: tokens received via wallet tran
 ### Time-windowed PnL
 
 ```bash
-bun run bin/headless-tracker.ts show pnl --timeframe=7d
-bun run bin/headless-tracker.ts show pnl --timeframe=24h
-bun run bin/headless-tracker.ts show pnl --timeframe=ytd
+headless-tracker show pnl --timeframe=7d
+headless-tracker show pnl --timeframe=24h
+headless-tracker show pnl --timeframe=ytd
 ```
 
 Values your **current basket** at historical CoinGecko prices and reports the delta vs. now. **Approximation:** it does NOT account for trades within the window — it answers "if I held this exact basket N days ago, how much have I gained?" Polymarket positions and crypto without a CoinGecko mapping are skipped (counted in `skippedSymbols`). CoinGecko free-tier historical is daily granularity, so `--timeframe=24h` is "yesterday's close vs now".
@@ -242,9 +242,9 @@ Values your **current basket** at historical CoinGecko prices and reports the de
 The bundled MetaMask token list covers `USDC, USDT, WETH, WBTC, LINK, DAI`. To track project-specific tokens:
 
 ```bash
-bun run bin/headless-tracker.ts token add metamask:0xabc 1 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 USDC 6
-bun run bin/headless-tracker.ts token list
-bun run bin/headless-tracker.ts token remove metamask:0xabc 1 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+headless-tracker token add metamask:0xabc 1 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 USDC 6
+headless-tracker token list
+headless-tracker token remove metamask:0xabc 1 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 ```
 
 Custom tokens are stored per-account in the SQLite account store (NOT the keychain — they're public on-chain identifiers, not secrets).
@@ -350,11 +350,16 @@ The point of headless-tracker is that you don't write SQL or learn a CLI — you
 
 ## Development
 
+Building from source uses [Bun 1.3+](https://bun.sh). End users don't need this — see [Quick start](#quick-start).
+
 ```bash
+git clone https://github.com/tamasPetki/HeadlessTracker.git
+cd headless-tracker
 bun install
-bun test                              # 274 tests, ~15s
+bun test                              # 323 tests, ~5s
 bun run typecheck                     # bun --bun tsc --noEmit
 bun run build:apps                    # bundle the dashboard MCP App into dist/mcp-apps/
+bun run build                         # build the Node-runnable dist/ (what npm ships)
 bun run start                         # start MCP server on stdio (debug only)
 bun run setup bybit                   # interactive credential setup
 ```
