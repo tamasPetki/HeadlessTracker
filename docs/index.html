@@ -305,6 +305,7 @@
           <code>npm i -g headless-tracker</code>
           <button class="copy-btn" onclick="navigator.clipboard.writeText('npm i -g headless-tracker').then(()=>{this.textContent='Copied';setTimeout(()=>{this.textContent='Copy'},1500)})">Copy</button>
         </div>
+        <p class="hero-keys" style="font-size:13.5px;color:var(--muted);margin:12px 0 0;line-height:1.55;">No API keys needed to try it. Point it at any public Solana or Polymarket wallet and see real holdings before you connect anything private.</p>
         <div class="hero-cta">
           <a class="btn-primary" href="#quickstart">Quick start</a>
           <a class="btn-ghost" href="https://github.com/tamasPetki/HeadlessTracker">View on GitHub</a>
@@ -339,9 +340,9 @@
 <div class="trust">
   <div class="container">
     <div class="trust-inner">
-      <span class="trust-item"><b>v1.0.0</b> on npm</span>
+      <span class="trust-item"><b>Live</b> on npm</span>
       <span class="trust-item"><b>5</b> connectors</span>
-      <span class="trust-item"><b>300+</b> tests</span>
+      <span class="trust-item"><b>323</b> tests</span>
       <span class="trust-item">Read-only by design</span>
       <span class="trust-item">Local-first, no telemetry</span>
       <span class="trust-item">TypeScript · MIT</span>
@@ -530,23 +531,27 @@ headless-tracker show holdings</code></pre>
     <div class="section-head">
       <div class="eyebrow">Quick start</div>
       <h2>Running in about five minutes.</h2>
-      <p class="lead">Runs under plain Node 22.5+ (or Bun). No clone, no build step. Credentials are validated and stored in your OS keychain at setup.</p>
+      <p class="lead">Runs under plain Node 22.5+ (or Bun). No clone, no build step. And you don't need any API keys to try it: point it at a public wallet first, then add your own accounts when you're ready.</p>
     </div>
-    <pre><code><span class="hl-comment"># 1. Install</span>
+    <pre><code><span class="hl-comment"># 1. Install (or skip this and use npx in the config below)</span>
 npm i -g headless-tracker
 
-<span class="hl-comment"># 2. Add an account (prompts for read-only credentials, then validates them)</span>
+<span class="hl-comment"># 2. Try it with zero API keys: any public Solana or Polymarket address</span>
+headless-tracker setup solana          <span class="hl-comment"># paste a public address, ENTER through the rest</span>
+headless-tracker show holdings         <span class="hl-comment"># real balances in your terminal, no Claude needed</span>
+
+<span class="hl-comment"># 3. Ready for your own accounts? Add the private ones (read-only keys)</span>
 headless-tracker setup bybit
 headless-tracker list-accounts
 
-<span class="hl-comment"># 3. Wire it into Claude Desktop — claude_desktop_config.json</span>
+<span class="hl-comment"># 4. Wire it into Claude Desktop: claude_desktop_config.json</span>
 {
   <span class="hl-key">"mcpServers"</span>: {
-    <span class="hl-key">"headless-tracker"</span>: { <span class="hl-key">"command"</span>: <span class="hl-val">"headless-tracker"</span> }
+    <span class="hl-key">"headless-tracker"</span>: { <span class="hl-key">"command"</span>: <span class="hl-val">"npx"</span>, <span class="hl-key">"args"</span>: [<span class="hl-val">"-y"</span>, <span class="hl-val">"headless-tracker"</span>] }
   }
 }
 
-<span class="hl-comment"># 4. Restart Claude Desktop and ask</span>
+<span class="hl-comment"># 5. Restart Claude Desktop and ask</span>
 <span class="hl-comment">#    "What's in my portfolio?"</span></code></pre>
     <p class="step-note">Prefer to clone and run from source? The <a href="https://github.com/tamasPetki/HeadlessTracker#readme">README</a> has the <code style="font-family:var(--mono);color:var(--text-dim)">git clone</code> + <code style="font-family:var(--mono);color:var(--text-dim)">bun install</code> path and per-connector setup for all five integrations.</p>
   </div>
