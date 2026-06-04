@@ -1,0 +1,19 @@
+# Smithery configuration for HeadlessTracker.
+#
+# Lets Smithery's registry start the MCP server on stdio and introspect its
+# tool list. End users normally install with `npx headless-tracker` (see README);
+# this file just tells Smithery to use that same start command.
+#
+# Listing tools requires no credentials, so the config schema is empty. Per-user
+# connectors (Bybit, Binance, EVM/Solana wallets, Polymarket) are configured
+# AFTER install via the OS keychain or HEADLESS_TRACKER_* env vars, never here.
+#
+# Data aggregation only, not financial advice.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: []
+    properties: {}
+  commandFunction: |-
+    (config) => ({ command: 'npx', args: ['-y', 'headless-tracker'] })
