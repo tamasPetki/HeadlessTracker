@@ -10,7 +10,24 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** Production-ready, live on npm (version badge above). 5 connectors (Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet), 15 MCP tools (6 data + 7 account/token management + 2 MCP App panels), 3 MCP prompts (`portfolio-dashboard`, `weekly-review`, `risk-check`), interactive 3-tab dashboard MCP App with donut + bar charts (Portfolio / Weekly / Risk + currency switcher + refresh), live Settings MCP App for setup/admin, CLI portfolio queries (`show holdings/pnl/transactions`), custom ERC-20 token lists, FIFO + Average Cost on transaction history, multi-currency display (USD/EUR/GBP/HUF), CoinGecko + Jupiter Price spot + historical price service, time-windowed PnL (`--timeframe=24h|7d|30d|ytd`), 323-test suite. Runs under plain Node (`npx headless-tracker`) or Bun. Working end-to-end with Claude Desktop. See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+**Status:** Production-ready and live on npm (version badge above). Five connectors (Bybit, Binance, MetaMask/EVM, Solana, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 323-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
+
+<details>
+<summary><b>Full feature list</b></summary>
+
+- **5 connectors:** Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet
+- **15 MCP tools:** 6 data + 7 account/token management + 2 MCP App panels
+- **3 MCP prompts:** `portfolio-dashboard`, `weekly-review`, `risk-check`
+- **Interactive dashboard MCP App:** 3 tabs (Portfolio / Weekly / Risk) with donut + bar charts, currency switcher, refresh button
+- **Live Settings MCP App** for setup and admin
+- **CLI portfolio queries:** `show holdings / pnl / transactions` (no Claude required)
+- **Custom ERC-20 token lists**; FIFO + Average Cost on transaction history
+- **Multi-currency display** (USD/EUR/GBP/HUF); CoinGecko + Jupiter spot and historical prices
+- **Time-windowed PnL** (`--timeframe=24h|7d|30d|ytd`)
+- **323-test suite**; runs under plain Node or Bun
+
+See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
+</details>
 
 ## What it does
 
@@ -22,6 +39,37 @@ Connects to your accounts (read-only), normalizes everything into a single schem
 - "Refresh Bybit and tell me my BTC P&L."
 
 The AI host generates the chart, the table, the breakdown. You don't build a UI.
+
+## Try it in 60 seconds (no API keys)
+
+You shouldn't have to hand a new tool your exchange keys just to find out whether it's any good. Solana and Polymarket read **public on-chain addresses**, so you can point HeadlessTracker at any wallet you can see (your own included) with zero credentials.
+
+```bash
+# install (or prefix any command with `npx`)
+npm install -g headless-tracker
+
+# add a public Solana wallet: no API key, just the address
+headless-tracker setup solana
+#   Solana address (base58): <paste any public address>
+#   (press ENTER through the optional RPC + dust prompts)
+
+# print the holdings right in your terminal, no Claude required
+headless-tracker show holdings
+```
+
+```text
+account            symbol  class   qty       value    price
+─────────────────  ──────  ──────  ────────  ───────  ────────
+solana:7Xk2…q9Fa   SOL     crypto  12.4081   $2604    $209.88
+solana:7Xk2…q9Fa   USDC    crypto  540.0000  $540.00  $1.00
+solana:7Xk2…q9Fa   JUP     crypto  1200.00   $612.00  $0.5100
+
+Total: $3756  (3 positions across 1 accounts)
+```
+
+*(Example output; the account id is shortened here for width. Your numbers come from the live chain.)*
+
+That is the whole loop: install, point at a public address, see normalized holdings. When you want your private accounts (Bybit, Binance), `setup` those too. Every connector uses **read-only** credentials, kept in your OS keychain, never written to disk and never sent anywhere except the exchange's own API. Then [wire it into Claude](#3-wire-up-claude-desktop) and ask *"what do I own?"* to get the same data as a chat-native dashboard.
 
 ## Interactive dashboard (live UI panel)
 
