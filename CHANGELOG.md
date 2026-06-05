@@ -2,6 +2,14 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.8 — 2026-06-05
+
+Cleans up Polymarket holdings, which a real wallet could see dominated by worthless settled positions.
+
+### Fixed
+
+- **Polymarket holdings now filter out settled-loss dust.** The data-api's `/positions` returns resolved positions the user bet wrong on — a large token count worth $0 — and these passed the existing `sizeThreshold` (which filters by token *count*, the wrong axis for prediction markets). On real wallets this was 57–98% of the rows: a holdings table dominated by $0 settled losses. `fetchHoldings` now drops positions whose current USD value is below a `dustThresholdUsd` (default $0.01), matching the Solana connector's value-based dust filter. Resolved *winnings* (value > 0) and open positions are kept; only the genuinely worthless are hidden. Verified live: one test wallet went from 42 rows (24 of them $0) to 18 real holdings. Tuneable per account.
+
 ## v1.0.7 — 2026-06-05
 
 Fixes a stale install instruction the CLI's own help was printing, and splits the largest connector file into readable modules (no behavior change).

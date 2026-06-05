@@ -297,4 +297,62 @@ describe("PolymarketConnector.fetchHoldings (mocked data-api)", () => {
       expect(result.value[0]!.symbol).toBe("0xcondX:1");
     }
   });
+
+  test("drops settled-loss dust (currentValue below the default $0.01 threshold)", async () => {
+    const fakePositions = [
+      { proxyWallet: "0xabc", asset: "1", conditionId: "0xreal", size: 50, avgPrice: 0.5,
+        initialValue: 25, currentValue: 25, curPrice: 0.5, title: "Real open bet",
+        slug: "real-bet", outcome: "Yes", outcomeIndex: 0, redeemable: false },
+      // Resolved loss: huge token count, $0 value, still returned by the data-api.
+      { proxyWallet: "0xabc", asset: "2", conditionId: "0xlost", size: 3000, avgPrice: 0.3,
+        initialValue: 90, currentValue: 0, curPrice: 0, title: "Lost bet",
+        slug: "lost-bet", outcome: "No", outcomeIndex: 1, redeemable: true },
+      // Sub-cent dust.
+      { proxyWallet: "0xabc", asset: "3", conditionId: "0xdust", size: 10, avgPrice: 0.1,
+        initialValue: 1, currentValue: 0.004, curPrice: 0.0004, title: "Dust",
+        slug: "dust", outcome: "Yes", outcomeIndex: 0, redeemable: true },
+    ];
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(JSON.stringify(fakePositions), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new PolymarketConnector();
+    const result = await conn.fetchHoldings({
+      account: { id: "polymarket:0xabc", connectorId: "polymarket", label: "p", createdAt: 1 },
+      credentials: { proxyWallet: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12" },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]!.symbol).toBe("real-bet:Yes");
+      expect(result.value[0]!.value).toBe(25);
+    }
+  });
+
+  test("dustThresholdUsd is user-tuneable (raising it drops more positions)", async () => {
+    const fakePositions = [
+      { proxyWallet: "0xabc", asset: "1", conditionId: "0xbig", size: 50, avgPrice: 0.5,
+        initialValue: 25, currentValue: 25, curPrice: 0.5, title: "Big", slug: "big",
+        outcome: "Yes", outcomeIndex: 0 },
+      { proxyWallet: "0xabc", asset: "2", conditionId: "0xsmall", size: 1, avgPrice: 0.5,
+        initialValue: 0.5, currentValue: 0.5, curPrice: 0.5, title: "Small", slug: "small",
+        outcome: "Yes", outcomeIndex: 0 },
+    ];
+    globalThis.fetch = (async (): Promise<Response> => {
+      return new Response(JSON.stringify(fakePositions), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const conn = new PolymarketConnector();
+    const result = await conn.fetchHoldings({
+      account: { id: "polymarket:0xabc", connectorId: "polymarket", label: "p", createdAt: 1 },
+      credentials: { proxyWallet: "0xAbCdEf1234567890aBcDeF1234567890AbCdEf12", dustThresholdUsd: 1 },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]!.symbol).toBe("big:Yes");
+    }
+  });
 });

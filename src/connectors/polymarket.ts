@@ -24,9 +24,16 @@ const DATA_API_BASE = "https://data-api.polymarket.com";
 
 interface PolymarketCreds extends ConnectorCredentials {
   proxyWallet: string;       // 0x... 40 hex chars — Polymarket-issued proxy wallet
-  // sizeThreshold filters out dust positions. Polymarket UI default is 1.0;
-  // we go lower (0.01) so even small positions show up. User-tuneable.
+  // sizeThreshold filters by token COUNT, server-side. Polymarket UI default is
+  // 1.0; we go lower (0.01) so even small positions show up. User-tuneable.
   sizeThreshold?: number;
+  // dustThresholdUsd filters by current USD VALUE, client-side. The data-api
+  // returns settled-loss positions (a resolved market the user bet wrong on):
+  // huge token count, $0 value. Those pass any sizeThreshold but are worthless,
+  // so a real wallet's holdings can be >90% $0 dust. We drop positions worth
+  // less than this (default $0.01 — only kills the genuinely worthless; any
+  // position worth a cent or more, including resolved winnings, stays).
+  dustThresholdUsd?: number;
 }
 
 function isPolymarketCreds(c: ConnectorCredentials): c is PolymarketCreds {
@@ -121,6 +128,7 @@ export class PolymarketConnector implements Connector {
     }
     const creds = ctx.credentials;
     const sizeThreshold = creds.sizeThreshold ?? 0.01;
+    const dustThresholdUsd = typeof creds.dustThresholdUsd === "number" ? creds.dustThresholdUsd : 0.01;
     const now = Date.now();
 
     const url = new URL(`${DATA_API_BASE}/positions`);
@@ -163,7 +171,11 @@ export class PolymarketConnector implements Connector {
       return err("schema_mismatch", "Polymarket /positions returned invalid JSON", { cause: e });
     }
 
-    const holdings: Holding[] = positions.map((p) => ({
+    const holdings: Holding[] = positions
+      // Drop settled-loss dust: resolved positions worth ~$0 that the data-api
+      // still returns with a large token count. See dustThresholdUsd above.
+      .filter((p) => (p.currentValue ?? 0) >= dustThresholdUsd)
+      .map((p) => ({
       accountId: ctx.account.id,
       // Symbol format: "{slug}:{outcome}". Readable for the LLM, deterministic, unique
       // per position. Falls back to conditionId+outcomeIndex if slug missing.
