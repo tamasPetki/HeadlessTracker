@@ -2,6 +2,18 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.7 — 2026-06-05
+
+Fixes a stale install instruction the CLI's own help was printing, and splits the largest connector file into readable modules (no behavior change).
+
+### Fixed
+
+- **`headless-tracker help` now prints the canonical `npx` Claude Desktop config.** The built-in help snippet still showed `{"command": "bunx", "args": ["headless-tracker"]}`, which requires Bun — the exact second-runtime friction removed in v1.0.1. It now matches the README and landing page: `{"command": "npx", "args": ["-y", "headless-tracker"]}`. The old-Node SQLite error message likewise leads with "upgrade to Node 22.5+" instead of suggesting `bunx`.
+
+### Changed
+
+- **Split `metamask.ts` (631 lines) into focused modules**, no functional change: `metamask-chains.ts` (the supported-chain catalog and curated common-token list), `metamask-etherscan.ts` (the Etherscan V2 transport and its error mapping), and `metamask.ts` (credential helpers and the connector class, now 521 lines). Verified by the existing 332-test suite.
+
 ## v1.0.6 — 2026-06-04
 
 Drops the `bybit-api` SDK for a tiny in-house signed-fetch client, cutting a fresh `npx headless-tracker` install from ~258 packages to ~97 and removing a deprecated-dependency warning.
