@@ -6,6 +6,16 @@ This file is the **public record** of architectural and product decisions. It's 
 
 ---
 
+## 2026-06-04 — Drop the `bybit-api` SDK for an in-house signed-fetch client
+
+**What**: The Bybit connector now uses a small in-house client (`src/connectors/bybit-rest.ts`) built on Node's `fetch` + `crypto`, instead of the `bybit-api` npm SDK. `bybit-api` is removed from dependencies.
+
+**Why**: `bybit-api@4.6.3` declares its build toolchain (webpack, webpack-cli, ts-loader, source-map-loader, webpack-bundle-analyzer) as `optionalDependencies`. npm installs optionalDependencies by default, so every `npx headless-tracker` install pulled ~160 extra transitive packages and emitted a deprecated-`abab` warning, for a connector that only issues two read-only GET requests. A clean-room install dropped from 258 packages to 97 after the change, and the warning is gone. The package's headline pitch is "lean, zero native dependencies, nothing you don't need", and shipping a webpack toolchain to end users contradicted that. We can't fix it from the consumer side: npm ignores a nested dependency's `overrides`, so our overrides don't apply when HeadlessTracker is installed as a dependency under npx or `-g`.
+
+**Alternatives considered**: npm `overrides` to prune the optional deps (rejected, ignored for a non-root package in npx/global installs); a `bun patch` on bybit-api (rejected, only affects our dev install, not the end user's fresh npm pull); upgrade bybit-api (rejected, 4.6.3 is latest and still carries the bug); fork it (overkill). The V5 signing is small and well-documented, so owning two endpoints is cheaper than carrying the SDK's whole footprint. Filing an upstream issue to move the build tools to `devDependencies` is worth doing in parallel but does not help current users.
+
+**Reversal trigger**: if Bybit changes its V5 auth scheme in a way that is painful to track by hand, or we come to need many more Bybit endpoints than the two we use, reconsider a maintained SDK, ideally one that keeps build tools out of its runtime dependencies.
+
 ## 2026-06-03 — `npx` / global npm is the canonical install path, not `git clone` + Bun
 
 **What**: The documented front door (README Quick Start, landing page, the Claude Desktop config snippet) leads with `npm i -g headless-tracker` / `npx headless-tracker`. The Claude Desktop config is `{"command": "npx", "args": ["-y", "headless-tracker"]}` — no clone, no absolute paths, no Bun. The `git clone` + Bun flow is now documented only in the Development section, for contributors.

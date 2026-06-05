@@ -2,6 +2,18 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.6 — 2026-06-04
+
+Drops the `bybit-api` SDK for a tiny in-house signed-fetch client, cutting a fresh `npx headless-tracker` install from ~258 packages to ~97 and removing a deprecated-dependency warning.
+
+### Changed
+
+- **The Bybit connector no longer depends on `bybit-api`.** The SDK declared its entire webpack build toolchain (webpack, webpack-cli, ts-loader, source-map-loader, webpack-bundle-analyzer) as `optionalDependencies`, which npm installs by default, pulling ~160 transitive packages and a deprecated `abab` warning into every install, for a connector that issues two read-only GET requests. Replaced with `src/connectors/bybit-rest.ts`, a small client on Node's built-in `fetch` + `crypto`. Same V5 signing (HMAC-SHA256 over `timestamp + apiKey + recvWindow + query`), same two endpoints (`/v5/account/wallet-balance`, `/v5/account/transaction-log`), zero added dependencies. Verified against the live Bybit API and with new unit tests covering the request signature and the full response parse.
+
+### Fixed
+
+- **Gateway-level Bybit auth and rate-limit errors are now categorized correctly.** A revoked key returns HTTP 401 with an empty body; the new client maps 401/403 to `auth_failed` and 429 to `rate_limited` rather than a generic network error.
+
 ## v1.0.5 — 2026-06-03
 
 Makes the docs match the capability shipped in v1.0.1. The package has run under plain Node (`npx headless-tracker`) since v1.0.1, but the README's Quick Start still told everyone to `git clone` + install Bun, and the Claude Desktop config still pointed at a local Bun clone with absolute paths. The traffic told the story: lots of repo clones, almost no one using the zero-friction path that already existed.

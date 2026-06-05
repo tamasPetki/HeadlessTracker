@@ -1,6 +1,6 @@
 {
   "name": "headless-tracker",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "mcpName": "io.github.tamasPetki/headless-tracker",
   "description": "Not financial advice. Portfolio data aggregation MCP server for crypto positions across exchanges, on-chain wallets, and prediction markets.",
   "type": "module",
@@ -62,7 +62,6 @@
     "@modelcontextprotocol/ext-apps": "^1.7.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@napi-rs/keyring": "^1.1.6",
-    "bybit-api": "^4.0.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

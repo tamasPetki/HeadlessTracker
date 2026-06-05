@@ -1,6 +1,8 @@
 // Bybit V5 connector — first end-to-end vertical (Day 1).
-// Implements src/connectors/types.ts:Connector. Uses official `bybit-api` SDK
-// for HMAC signing, retry/backoff, and V5 endpoint coverage.
+// Implements src/connectors/types.ts:Connector. Uses a tiny in-house signed-fetch
+// client (./bybit-rest.ts) instead of the `bybit-api` SDK: we only need two
+// read-only GET endpoints, and the SDK pulled its whole webpack build toolchain
+// (via optionalDependencies) into every install. Zero added dependencies now.
 //
 // Account model: Bybit users typically have a single UNIFIED trading account
 // (post-2023 migration), but classic users may still have SPOT + DERIVATIVES + FUNDING
@@ -9,7 +11,7 @@
 //
 // V5 docs: https://bybit-exchange.github.io/docs/v5/intro
 
-import { RestClientV5 } from "bybit-api";
+import { BybitRestClient } from "./bybit-rest.ts";
 
 import type { Connector, ConnectorContext, ConnectorCredentials } from "./types.ts";
 import type { Holding, Result, Transaction } from "../types.ts";
@@ -64,8 +66,8 @@ function getAccountTypes(creds: BybitCreds): BybitAccountType[] {
   return out;
 }
 
-function clientFor(creds: BybitCreds): RestClientV5 {
-  return new RestClientV5({
+function clientFor(creds: BybitCreds): BybitRestClient {
+  return new BybitRestClient({
     key: creds.apiKey,
     secret: creds.apiSecret,
     testnet: creds.testnet ?? false,
