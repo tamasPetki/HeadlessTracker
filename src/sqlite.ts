@@ -62,7 +62,7 @@ export function openDatabase(path: string): SqliteDb {
     const version = process.versions?.node ?? "unknown";
     throw new Error(
       `HeadlessTracker needs Node 22.5+ with built-in SQLite (node:sqlite), or Bun. ` +
-        `Detected Node ${version}. Upgrade Node, or run via 'bunx headless-tracker'. ` +
+        `Detected Node ${version}. Upgrade to Node 22.5+ (or run it under Bun). ` +
         `Original error: ${(e as Error).message}`
     );
   }

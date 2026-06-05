@@ -22,7 +22,8 @@ import {
 } from "../src/tokens.ts";
 import { BinanceConnector } from "../src/connectors/binance.ts";
 import { BybitConnector } from "../src/connectors/bybit.ts";
-import { MetaMaskConnector, SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask.ts";
+import { MetaMaskConnector } from "../src/connectors/metamask.ts";
+import { SUPPORTED_CHAINS, type SupportedChainId } from "../src/connectors/metamask-chains.ts";
 import { PolymarketConnector } from "../src/connectors/polymarket.ts";
 import { SolanaConnector } from "../src/connectors/solana.ts";
 import { runStdioServer } from "../src/mcp/server.ts";
@@ -84,8 +85,8 @@ claude_desktop_config.json snippet:
   {
     "mcpServers": {
       "headless-tracker": {
-        "command": "bunx",
-        "args": ["headless-tracker"]
+        "command": "npx",
+        "args": ["-y", "headless-tracker"]
       }
     }
   }

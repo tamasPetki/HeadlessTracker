@@ -8,7 +8,7 @@
 // AccountStore's SQLite already has WAL retry and is the right home.
 
 import type { AccountStore } from "./accounts.ts";
-import { SUPPORTED_CHAINS, type SupportedChainId } from "./connectors/metamask.ts";
+import { SUPPORTED_CHAINS, type SupportedChainId } from "./connectors/metamask-chains.ts";
 import type { Account, Result } from "./types.ts";
 import { err, ok } from "./types.ts";
 

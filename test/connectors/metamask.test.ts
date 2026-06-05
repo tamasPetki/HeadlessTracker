@@ -2,7 +2,8 @@
 // and one mocked-fetch happy-path integration to exercise the multi-chain fan-out.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { applyDecimals, MetaMaskConnector, SUPPORTED_CHAINS } from "../../src/connectors/metamask.ts";
+import { applyDecimals, MetaMaskConnector } from "../../src/connectors/metamask.ts";
+import { SUPPORTED_CHAINS } from "../../src/connectors/metamask-chains.ts";
 import type { Account } from "../../src/types.ts";
 
 describe("applyDecimals", () => {
