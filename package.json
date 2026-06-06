@@ -1,6 +1,6 @@
 {
   "name": "headless-tracker",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "mcpName": "io.github.tamasPetki/headless-tracker",
   "description": "Not financial advice. Portfolio data aggregation MCP server for crypto positions across exchanges, on-chain wallets, and prediction markets.",
   "type": "module",

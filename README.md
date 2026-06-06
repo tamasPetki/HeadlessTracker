@@ -165,6 +165,10 @@ The variable name is derived from the account identifier (`setup` prints the exa
 }
 ```
 
+#### Optional: request timeout
+
+Each per-account fetch is bounded by a deadline (default 30s) so a hung upstream can never stall a tool call — it degrades to a `network_timeout` failure for that one account while the rest return. Override it with `HEADLESS_TRACKER_REQUEST_TIMEOUT_MS` (e.g. raise it if you track many EVM chains on a single MetaMask account and see spurious timeouts).
+
 ### 3. Wire up Claude Desktop
 
 Edit your `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`):

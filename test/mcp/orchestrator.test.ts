@@ -399,4 +399,105 @@ describe("Orchestrator", () => {
     expect(result.failures[0]!.error).toContain("unknown");
     expect(result.failures[0]!.error).toContain("connector blew up");
   });
+
+  test("a connector that HANGS times out at the deadline; other accounts still return", async () => {
+    // The core reliability guarantee: a connector whose request never resolves
+    // (a hung upstream, or a connector that doesn't thread the abort signal into
+    // its fetch — bybit.ts did exactly this) must not stall the tool call. The
+    // orchestrator races each fetch against requestTimeoutMs, so a hang degrades
+    // to a per-account network_timeout while healthy accounts return normally.
+    setupAccount({ id: "bybit:UNIFIED", connectorId: "bybit", label: "B", createdAt: 1 });
+    setupAccount({ id: "metamask:0xabc", connectorId: "metamask", label: "M", createdAt: 2 });
+
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      requestTimeoutMs: 60, // short so the test is fast
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC" })]),
+        }),
+        metamask: new StubConnector({
+          id: "metamask",
+          // Never resolves and ignores the signal entirely — the worst case the
+          // race must defend against.
+          holdingsResult: () => new Promise<never>(() => {}),
+        }),
+      },
+    });
+
+    const start = Date.now();
+    const result = await orch.getHoldings(undefined);
+    const elapsed = Date.now() - start;
+
+    // The caller never waits meaningfully past the deadline...
+    expect(elapsed).toBeLessThan(1000);
+    // ...the healthy account still returns...
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]!.symbol).toBe("BTC");
+    // ...and the hung account is one isolated timeout failure, with a message
+    // that names the deadline rather than a mysterious "aborted".
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]!.accountId).toBe("metamask:0xabc");
+    expect(result.failures[0]!.error).toContain("network_timeout");
+    expect(result.failures[0]!.error).toContain("timed out after 60ms");
+  });
+
+  test("a connector that HONORS the abort signal surfaces a normalized timeout", async () => {
+    // When a connector does thread the signal into its fetch, the deadline
+    // aborts the real request and the connector returns its own network_timeout;
+    // the orchestrator normalizes that generic "aborted" into the clear
+    // deadline message.
+    setupAccount({ id: "polymarket:0xdef", connectorId: "polymarket", label: "P", createdAt: 1 });
+
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      requestTimeoutMs: 50,
+      connectorOverrides: {
+        polymarket: new StubConnector({
+          id: "polymarket",
+          holdingsResult: (ctx) =>
+            new Promise((resolve) => {
+              ctx.signal?.addEventListener(
+                "abort",
+                () => resolve(err("network_timeout", "Aborted by caller")),
+                { once: true }
+              );
+            }),
+        }),
+      },
+    });
+
+    const result = await orch.getHoldings(undefined);
+    expect(result.data).toHaveLength(0);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]!.error).toContain("timed out after 50ms");
+  });
+
+  test("a fast connector under a short deadline does NOT spuriously time out", async () => {
+    // Guard against the timeout firing on a healthy fetch.
+    setupAccount({ id: "bybit:UNIFIED", connectorId: "bybit", label: "B", createdAt: 1 });
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      requestTimeoutMs: 500,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          delayMs: 20, // well under the deadline
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC" })]),
+        }),
+      },
+    });
+
+    const result = await orch.getHoldings(undefined);
+    expect(result.failures).toHaveLength(0);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]!.symbol).toBe("BTC");
+  });
 });

@@ -2,6 +2,14 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.10 — 2026-06-06
+
+Stops a hung upstream from stalling a tool call indefinitely.
+
+### Fixed
+
+- **A connector request can no longer hang the whole tool call forever.** Every connector honors an `AbortSignal` (and `prices.ts` / `fx.ts` already timed out their own fetches), but nothing ever *set* a deadline on the connector path — the tool handlers called the orchestrator with no signal, so if an upstream accepted the TCP connection and then never responded, the holdings/transactions call would spin forever and the MCP host would hang with it. The orchestrator now races each per-account fetch against a deadline (default 30s, override with `HEADLESS_TRACKER_REQUEST_TIMEOUT_MS`): a hang degrades to a single `network_timeout` failure for that one account while the healthy accounts return normally — the same graceful-degradation contract a thrown connector error already got in v1.0.9. The race is an airtight backstop even for a connector that doesn't fully thread the signal into its fetch (the Bybit connector was checking the abort flag only *after* its request returned, so its fetch is now passed the signal too and a stuck Bybit call is actually cancelled, not just abandoned).
+
 ## v1.0.9 — 2026-06-06
 
 Adds opt-in error reporting and hardens the fan-out so one broken connector can no longer take down a whole holdings request.

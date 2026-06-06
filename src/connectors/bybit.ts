@@ -140,7 +140,7 @@ export class BybitConnector implements Connector {
     const perType = await Promise.all(
       types.map(async (accountType) => {
         try {
-          const resp = await client.getWalletBalance({ accountType });
+          const resp = await client.getWalletBalance({ accountType }, ctx.signal);
           return { accountType, resp, err: null as Error | null };
         } catch (e) {
           return { accountType, resp: null, err: e as Error };
@@ -226,11 +226,14 @@ export class BybitConnector implements Connector {
     const perType = await Promise.all(
       txTypes.map(async (accountType) => {
         try {
-          const resp = await client.getTransactionLog({
-            accountType,
-            startTime: since,
-            limit: 50,
-          });
+          const resp = await client.getTransactionLog(
+            {
+              accountType,
+              startTime: since,
+              limit: 50,
+            },
+            ctx.signal
+          );
           return { accountType, resp, err: null as Error | null };
         } catch (e) {
           return { accountType, resp: null, err: e as Error };

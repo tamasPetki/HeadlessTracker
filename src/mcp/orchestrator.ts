@@ -26,6 +26,19 @@ const CONNECTOR_FACTORIES: Record<ConnectorId, () => Connector> = {
   solana: () => new SolanaConnector(),
 };
 
+// A connector operation must finish within this deadline. Every connector
+// honors ctx.signal (connectors/types.ts says they MUST), but until now nothing
+// ever SET a timeout on that signal: the tool handlers call getHoldings() with
+// no signal, so a hung upstream (TCP connected, response never arrives) would
+// block the MCP tool call forever — the host just spins. We bound each
+// per-account fetch with a timeout signal (combined with any caller signal), so
+// a hang degrades to a per-account network_timeout failure instead of an
+// indefinite stall, the same graceful-degradation contract as a thrown error.
+// Generous by default to fit the slowest legitimate connector (MetaMask fans
+// out across up to 6 chains); override via env for unusual multi-chain setups.
+const DEFAULT_REQUEST_TIMEOUT_MS =
+  Number(process.env.HEADLESS_TRACKER_REQUEST_TIMEOUT_MS) || 30_000;
+
 export interface OrchestratorOptions {
   accountStore?: AccountStore;
   vault?: Vault;
@@ -33,6 +46,9 @@ export interface OrchestratorOptions {
   // Pre-populated connector instances. Bypasses the lazy factory.
   // Used by tests to inject stubs without mocking the module.
   connectorOverrides?: Partial<Record<ConnectorId, Connector>>;
+  // Per-account fetch deadline in ms. Defaults to DEFAULT_REQUEST_TIMEOUT_MS
+  // (env-overridable). Exposed so tests can use a short timeout.
+  requestTimeoutMs?: number;
 }
 
 interface FetchOptions {
@@ -54,11 +70,13 @@ export class Orchestrator {
   private connectors: Map<ConnectorId, Connector> = new Map();
   // In-flight Promise dedup (eng review 4A.2). Keyed by cache key.
   private inFlight: Map<string, Promise<unknown>> = new Map();
+  private requestTimeoutMs: number;
 
   constructor(opts: OrchestratorOptions = {}) {
     this.accountStore = opts.accountStore ?? defaultAccountStore();
     this.vault = opts.vault ?? defaultVault();
     this.cache = opts.cache ?? defaultCache();
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     if (opts.connectorOverrides) {
       for (const [id, conn] of Object.entries(opts.connectorOverrides)) {
         if (conn) this.connectors.set(id as ConnectorId, conn);
@@ -204,13 +222,60 @@ export class Orchestrator {
             ? { ...credsResult.value, customTokens }
             : credsResult.value;
 
+        // Bound the fetch with a timeout, combined with any caller-supplied
+        // signal. Connectors honor ctx.signal, so passing this in lets a
+        // well-behaved connector abort its own in-flight request. The timer
+        // behind AbortSignal.timeout is unref'd, so it never keeps the process
+        // (or a test runner) alive past a fast success.
+        const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs);
+        const signal = opts.signal
+          ? AbortSignal.any([opts.signal, timeoutSignal])
+          : timeoutSignal;
+
         const ctx: ConnectorContext = {
           account,
           credentials,
-          signal: opts.signal,
+          signal,
         };
 
-        const fetchResult = await fetcher(ctx, connector);
+        // Race the connector against the deadline. Passing `signal` above is not
+        // enough on its own: a connector that doesn't thread the signal all the
+        // way into its fetch (or any future one that regresses) would still hang
+        // forever, and a hung fetch must never stall the user's tool call. The
+        // race is the airtight backstop — the caller can never wait past the
+        // deadline regardless of per-connector correctness. The orphaned fetcher
+        // gets a no-op .catch so a late rejection (after the race has settled)
+        // doesn't surface as an unhandledRejection.
+        const fetcherPromise = fetcher(ctx, connector);
+        fetcherPromise.catch(() => {});
+        const deadline = new Promise<Result<T[]>>((resolve) => {
+          const onTimeout = () =>
+            resolve(
+              err(
+                "network_timeout",
+                `${account.connectorId} ${kind.split(":")[0]} timed out after ${this.requestTimeoutMs}ms`
+              )
+            );
+          if (timeoutSignal.aborted) onTimeout();
+          else timeoutSignal.addEventListener("abort", onTimeout, { once: true });
+        });
+
+        let fetchResult = await Promise.race([fetcherPromise, deadline]);
+
+        // If our deadline (not the caller) aborted, a connector that honored the
+        // signal reports a generic "aborted" network_timeout; normalize it to the
+        // clearer deadline message so the surfaced failure is actionable.
+        if (
+          !fetchResult.ok &&
+          fetchResult.error.kind === "network_timeout" &&
+          timeoutSignal.aborted &&
+          !opts.signal?.aborted
+        ) {
+          fetchResult = err(
+            "network_timeout",
+            `${account.connectorId} ${kind.split(":")[0]} timed out after ${this.requestTimeoutMs}ms`
+          );
+        }
 
         if (fetchResult.ok) {
           this.cache.set(account.connectorId, cacheKey, fetchResult.value);
