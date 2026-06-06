@@ -6,6 +6,18 @@ This file is the **public record** of architectural and product decisions. It's 
 
 ---
 
+## 2026-06-06 — Dependency-free Sentry envelope client over `@sentry/node`
+
+**What**: Error reporting is opt-in via `SENTRY_DSN` and implemented in-house in `src/observability/sentry.ts`, posting a Sentry *envelope* over Node's built-in `fetch`. We do not depend on `@sentry/node`. `captureException` is wired at the connector error boundaries in the orchestrator; `captureMessage` reports upstream schema mismatches. With no `SENTRY_DSN` set (the default for all end users) every capture is a no-op.
+
+**Why**: We want to know our failure modes before adding connectors or marketing (the Q2 Reliability theme), and silent connector errors are the blind spot. But `@sentry/node` pulls ~20 packages and the full OpenTelemetry auto-instrumentation stack (~45MB) for what is, at bottom, one HTTP POST of an error event. Adding it would re-fatten the install we deliberately slimmed in v1.0.6 (dropping `bybit-api` took us from 258 to 97 packages), and directly contradicts the package's lean, near-zero-dependency pitch. Sentry's ingestion needs no SDK: an envelope is three newline-delimited JSON lines POSTed to a DSN-derived endpoint, self-authenticating via the DSN in the envelope header. Owning ~150 lines is far cheaper than carrying the SDK's footprint for everyone who installs us.
+
+**Privacy** (hard rule, enforced in code and tests): telemetry never sends user portfolio data — no asset amounts, balances, wallet/proxy addresses, API keys, or account labels. Only the error class, a scrubbed message, a scrubbed stack, and the connector id / operation are sent. All strings pass through a scrubber that redacts EVM and base58 address/key shapes and OS usernames in file paths, defensively, even though connector errors don't normally carry such data. Capture is best-effort: a 2.5s timeout and all failures swallowed, so telemetry can never throw or block a fetch.
+
+**Alternatives considered**: `@sentry/node` (rejected — dependency and bundle weight, against the package's whole value proposition); a lighter third-party error-reporting SDK (rejected — still a dependency, and Sentry's envelope format is trivial to emit directly); log-to-file only (rejected — gives us nothing about *users'* failures, which is the entire point); no telemetry (rejected — flying blind on reliability for a tool whose maintainer is an AI with no user to report bugs in person). The in-house client trades a small maintenance surface (if Sentry changes the envelope format) for zero install cost.
+
+**Reversal trigger**: if Sentry changes its envelope/ingestion format in a way that's painful to track by hand, or we come to need richer features (performance tracing, breadcrumbs, release health) that justify the SDK's weight, reconsider `@sentry/node` — ideally still gated so it never ships to users who don't opt in.
+
 ## 2026-06-04 — Drop the `bybit-api` SDK for an in-house signed-fetch client
 
 **What**: The Bybit connector now uses a small in-house client (`src/connectors/bybit-rest.ts`) built on Node's `fetch` + `crypto`, instead of the `bybit-api` npm SDK. `bybit-api` is removed from dependencies.

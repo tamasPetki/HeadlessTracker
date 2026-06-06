@@ -2,6 +2,18 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.9 — 2026-06-06
+
+Adds opt-in error reporting and hardens the fan-out so one broken connector can no longer take down a whole holdings request.
+
+### Added
+
+- **Opt-in Sentry error reporting, with no new dependencies.** Set `SENTRY_DSN` and the server reports unexpected connector exceptions and upstream schema mismatches; leave it unset (the default for everyone) and every capture is a silent no-op. There is no `@sentry/node`: the SDK pulls ~20 packages and the whole OpenTelemetry stack for what is one HTTP POST, which would undo the install slimming from v1.0.6. Instead `src/observability/sentry.ts` posts a Sentry *envelope* directly via Node's built-in `fetch`, self-authenticating with the DSN. **Privacy is a hard rule:** it never sends portfolio data (no amounts, balances, wallet/proxy addresses, API keys, or account labels) — only the error class, a scrubbed message, a scrubbed stack, and the connector id / operation. All error strings pass through a scrubber that redacts anything address- or key-like (EVM, base58) and OS usernames in paths, defensively. Capture is best-effort: a 2.5s timeout, and any failure is swallowed so telemetry can never break a fetch.
+
+### Fixed
+
+- **A connector that throws no longer wipes out every account's holdings.** The per-account fan-out (`Promise.all`) had no error boundary, so if any connector threw an unexpected exception (a bug, not a handled error result) the entire aggregated request rejected and every other account returned nothing. Each per-account fetch is now wrapped: a throw is caught, reported (if Sentry is configured), and degraded to a single `unknown` failure for that one account, while the healthy accounts return their data normally. Pinned by a regression test.
+
 ## v1.0.8 — 2026-06-05
 
 Cleans up Polymarket holdings, which a real wallet could see dominated by worthless settled positions.

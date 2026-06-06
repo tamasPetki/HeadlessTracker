@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { packageRoot } from "../package-root.ts";
+import { initSentry } from "../observability/sentry.ts";
 
 import {
   GET_HOLDINGS_TOOL_NAME,
@@ -346,6 +347,11 @@ export function createMcpServer(): McpServer {
 }
 
 export async function runStdioServer(): Promise<void> {
+  // Configure error reporting once at boot. No-op unless SENTRY_DSN is set
+  // (the default for end users); pins the release to the server version so
+  // captured events are tagged with the running build. Capture itself is
+  // best-effort and never sends portfolio data — see src/observability/sentry.ts.
+  initSentry(undefined, SERVER_VERSION);
   const server = createMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);

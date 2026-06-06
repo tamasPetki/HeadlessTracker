@@ -16,6 +16,7 @@ import type { Connector, ConnectorContext } from "../connectors/types.ts";
 import { defaultVault, type Vault } from "../vault.ts";
 import type { Account, ConnectorId, Holding, Result, Transaction } from "../types.ts";
 import { err, ok } from "../types.ts";
+import { captureException, captureMessage } from "../observability/sentry.ts";
 
 const CONNECTOR_FACTORIES: Record<ConnectorId, () => Connector> = {
   bybit: () => new BybitConnector(),
@@ -214,6 +215,15 @@ export class Orchestrator {
         if (fetchResult.ok) {
           this.cache.set(account.connectorId, cacheKey, fetchResult.value);
         } else {
+          // An unexpected upstream shape is a developer signal (the API changed,
+          // or our parser is wrong), not a user-fixable state like auth/rate-limit.
+          // Report it; no-op unless SENTRY_DSN is set.
+          if (fetchResult.error.kind === "schema_mismatch") {
+            await captureMessage(`schema_mismatch: ${fetchResult.error.message}`, {
+              connector: account.connectorId,
+              operation: kind.split(":")[0],
+            });
+          }
           // On rate_limited / network failure, fall back to stale cache if we have it.
           const cached = this.cache.get<T[]>(account.connectorId, cacheKey);
           if (cached) {
@@ -222,6 +232,19 @@ export class Orchestrator {
         }
 
         return fetchResult;
+      } catch (e) {
+        // A connector THREW (an unexpected bug, not a handled err()). Before, this
+        // rejected the whole Promise.all and took down every account's fetch at
+        // once. Report it to Sentry (no-op unless SENTRY_DSN is set) and degrade to
+        // a per-account failure so the other accounts/connectors still return data.
+        await captureException(e, {
+          connector: account.connectorId,
+          operation: kind.split(":")[0],
+        });
+        return err(
+          "unknown",
+          `${account.connectorId} ${kind.split(":")[0]} failed unexpectedly: ${(e as Error).message}`
+        );
       } finally {
         this.inFlight.delete(cacheKey);
       }

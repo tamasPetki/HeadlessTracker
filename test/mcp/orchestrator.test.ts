@@ -8,6 +8,7 @@ import { Orchestrator } from "../../src/mcp/orchestrator.ts";
 import type { Account } from "../../src/types.ts";
 import { err, ok } from "../../src/types.ts";
 import { StubConnector, StubVault, makeHolding } from "../helpers/stub-connector.ts";
+import { initSentry } from "../../src/observability/sentry.ts";
 
 let cache: Cache;
 let accountStore: AccountStore;
@@ -17,6 +18,10 @@ beforeEach(() => {
   cache = new Cache({ dbPath: ":memory:" });
   accountStore = new AccountStore({ dbPath: ":memory:" });
   vault = new StubVault();
+  // Hermetic telemetry: even if SENTRY_DSN is present in the env, force capture
+  // to a no-op so the orchestrator's error-boundary reporting never makes a
+  // network call during these tests.
+  initSentry(undefined);
 });
 
 afterEach(() => {
@@ -355,5 +360,43 @@ describe("Orchestrator", () => {
     await orch.getHoldings(undefined);
     expect(capturedCreds).toBeDefined();
     expect(capturedCreds!.customTokens).toBeUndefined();
+  });
+
+  test("a connector that THROWS degrades to a per-account failure; other accounts still return", async () => {
+    // Reliability boundary: before the orchestrator wrapped fetchForAccount in a
+    // try/catch, a connector that threw (an unexpected bug, not a handled err())
+    // rejected the whole Promise.all and took down EVERY account's fetch at once.
+    // Now a throw is caught, reported to Sentry (no-op here — telemetry is off),
+    // and degraded to a single err("unknown") failure for that account only.
+    setupAccount({ id: "bybit:UNIFIED", connectorId: "bybit", label: "B", createdAt: 1 });
+    setupAccount({ id: "metamask:0xabc", connectorId: "metamask", label: "M", createdAt: 2 });
+
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC" })]),
+        }),
+        metamask: new StubConnector({
+          id: "metamask",
+          holdingsResult: () => {
+            throw new Error("connector blew up");
+          },
+        }),
+      },
+    });
+
+    const result = await orch.getHoldings(undefined);
+    // The healthy account still returns its holding...
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]!.symbol).toBe("BTC");
+    // ...and the throwing account becomes one isolated failure, not a total wipeout.
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]!.accountId).toBe("metamask:0xabc");
+    expect(result.failures[0]!.error).toContain("unknown");
+    expect(result.failures[0]!.error).toContain("connector blew up");
   });
 });

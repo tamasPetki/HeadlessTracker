@@ -344,7 +344,8 @@ MCP App panels (interactive UI rendered in the chat):
 ## Why local-first
 
 - **API keys never leave your machine.** Stored in your OS keychain via [`@napi-rs/keyring`](https://github.com/Brooooooklyn/keyring-node).
-- **Cache is local SQLite** (the runtime's built-in driver: `node:sqlite` under Node, `bun:sqlite` under Bun). No server, no SaaS, no telemetry, no analytics pings.
+- **Cache is local SQLite** (the runtime's built-in driver: `node:sqlite` under Node, `bun:sqlite` under Bun). No server, no SaaS, no analytics pings.
+- **No telemetry by default.** Error reporting is strictly opt-in: it only does anything if *you* set a `SENTRY_DSN`, and even then it never sends portfolio data — no amounts, balances, wallet addresses, API keys, or account labels, only the error class and a scrubbed message/stack plus which connector failed. See [decisions.md](decisions.md) (2026-06-06) for the details.
 - **Read-only by design.** No transaction signing. Nothing this tool can do can lose your money.
 - **Per-connector cache TTL** (crypto wallets 60s, exchanges 120s, Polymarket 30s) keeps things fast without hammering upstream APIs.
 
