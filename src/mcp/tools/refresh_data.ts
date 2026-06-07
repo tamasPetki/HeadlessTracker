@@ -25,11 +25,15 @@ export const REFRESH_DATA_DESCRIPTION = [
   "trigger fetches on its own.",
 ].join(" ");
 
-// Schema kept simple (no chained .describe()) to avoid TS2589 inference depth
-// errors in @modelcontextprotocol/sdk's tool() generic. Argument descriptions
-// live in REFRESH_DATA_DESCRIPTION instead.
+// Per-parameter .describe() so the JSON Schema clients/indexers read carries
+// machine-readable parameter semantics, not just the prose blob above.
 export const REFRESH_DATA_INPUT_SCHEMA = {
-  connector: z.enum(["bybit", "binance", "metamask", "polymarket", "solana"]).optional(),
+  connector: z
+    .enum(["bybit", "binance", "metamask", "polymarket", "solana"])
+    .optional()
+    .describe(
+      "Scope the cache invalidation to one connector. Omit to invalidate every tracker connector's cached holdings and transactions."
+    ),
 };
 
 export interface RefreshDataArgs {

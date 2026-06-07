@@ -43,8 +43,16 @@ export const GET_TRANSACTIONS_DESCRIPTION = [
 ].join(" ");
 
 export const GET_TRANSACTIONS_INPUT_SCHEMA = {
-  account_id: z.string().optional(),
-  since: z.string().optional(),
+  account_id: z
+    .string()
+    .optional()
+    .describe("Scope to one account (e.g. 'metamask:0xabc...'). Omit for all accounts."),
+  since: z
+    .string()
+    .optional()
+    .describe(
+      "Lower time bound: shorthand ('24h', '7d', '30d', '90d') or epoch milliseconds as a string (e.g. '1700000000000'). Omit for roughly the last 50 transactions per account regardless of date."
+    ),
 };
 
 export interface GetTransactionsArgs {

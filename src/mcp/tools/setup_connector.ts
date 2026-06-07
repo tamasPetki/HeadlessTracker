@@ -58,51 +58,70 @@ export const SETUP_CONNECTOR_DESCRIPTION = [
 ].join(" ");
 
 const BYBIT_CREDS = z.object({
-  apiKey: z.string().min(1),
-  apiSecret: z.string().min(1),
+  apiKey: z.string().min(1).describe("Bybit API key with READ permission only."),
+  apiSecret: z.string().min(1).describe("Bybit API secret paired with the key."),
   // Primary type determines the account ID (`bybit:UNIFIED`, etc.) and is
   // also the type validate-credentials probes. UNIFIED is the v0.13+ default.
-  accountType: z.enum(["UNIFIED", "CONTRACT", "SPOT", "FUND"]),
+  accountType: z
+    .enum(["UNIFIED", "CONTRACT", "SPOT", "FUND"])
+    .describe("Primary account type; also becomes the account id (e.g. bybit:UNIFIED). UNIFIED is the modern default."),
   // Optional: extra types to fan out across in fetchHoldings/fetchTransactions.
   // Common pattern: ["FUND"] alongside UNIFIED so funding-wallet balances
   // (USDT parking, etc.) aren't invisible. Same API key covers all types
   // the user has enabled.
-  accountTypes: z.array(z.enum(["UNIFIED", "CONTRACT", "SPOT", "FUND"])).optional(),
+  accountTypes: z
+    .array(z.enum(["UNIFIED", "CONTRACT", "SPOT", "FUND"]))
+    .optional()
+    .describe("Optional extra account types to also fetch (e.g. ['FUND'] so funding-wallet balances aren't missed). Same key covers all enabled types."),
 });
 
 const BINANCE_CREDS = z.object({
-  apiKey: z.string().min(1),
-  apiSecret: z.string().min(1),
-  includeFutures: z.boolean().optional(),
-  recvWindow: z.number().int().positive().optional(),
+  apiKey: z.string().min(1).describe("Binance API key with 'Enable Reading' only."),
+  apiSecret: z.string().min(1).describe("Binance API secret paired with the key."),
+  includeFutures: z.boolean().optional().describe("Default false. Set true to also pull USDM futures balances."),
+  recvWindow: z.number().int().positive().optional().describe("Optional Binance recvWindow in ms (request validity window)."),
 });
 
 const METAMASK_CREDS = z.object({
-  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
-  etherscanApiKey: z.string().min(1),
-  chainIds: z.array(z.number().int()).min(1),
-  trackCommonTokens: z.boolean().optional(),
-  hasEtherscanPro: z.boolean().optional(),
+  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/).describe("Public EVM wallet address (0x + 40 hex). Not a secret."),
+  etherscanApiKey: z.string().min(1).describe("Etherscan API key — a public-data rate-limit token, used across all EVM chains via Etherscan V2."),
+  chainIds: z.array(z.number().int()).min(1).describe("EVM chain ids to track (e.g. [1,137,8453] for Ethereum/Polygon/Base)."),
+  trackCommonTokens: z.boolean().optional().describe("Default true: also track the bundled common ERC-20s (USDC/USDT/WETH/WBTC/LINK/DAI)."),
+  hasEtherscanPro: z.boolean().optional().describe("Default false. Set true if the Etherscan key is a Pro plan (raises rate limits / unlocks some chains)."),
 });
 
 const POLYMARKET_CREDS = z.object({
-  proxyWallet: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
-  sizeThreshold: z.number().nonnegative().optional(),
+  proxyWallet: z.string().regex(/^0x[a-fA-F0-9]{40}$/).describe("Public Polymarket proxy wallet address (0x + 40 hex). Not a secret."),
+  sizeThreshold: z.number().nonnegative().optional().describe("Hide positions with token count below this (default 0.01). For $0 dust by value, see dustThresholdUsd in connector config."),
 });
 
 const SOLANA_CREDS = z.object({
-  address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
-  rpcUrl: z.string().url().optional(),
-  dustThresholdUsd: z.number().nonnegative().optional(),
+  address: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/).describe("Public Solana wallet address (base58, 32-44 chars). Not a secret."),
+  rpcUrl: z.string().url().optional().describe("Optional premium RPC URL. Omit to use the public mainnet-beta RPC (fine for single wallets)."),
+  dustThresholdUsd: z.number().nonnegative().optional().describe("Hide token positions worth less than this USD value (default 0.5)."),
 });
 
 export const SETUP_CONNECTOR_INPUT_SCHEMA = {
-  connector: z.enum(["bybit", "binance", "metamask", "polymarket", "solana"]),
-  bybit: BYBIT_CREDS.optional(),
-  binance: BINANCE_CREDS.optional(),
-  metamask: METAMASK_CREDS.optional(),
-  polymarket: POLYMARKET_CREDS.optional(),
-  solana: SOLANA_CREDS.optional(),
+  connector: z
+    .enum(["bybit", "binance", "metamask", "polymarket", "solana"])
+    .describe(
+      "Which connector to set up. Provide the matching credential object below (e.g. connector='bybit' requires the 'bybit' object). All credentials are READ-ONLY by design."
+    ),
+  bybit: BYBIT_CREDS.optional().describe(
+      "Bybit credentials (required when connector='bybit'). Read-only API key/secret + account type."
+    ),
+  binance: BINANCE_CREDS.optional().describe(
+      "Binance credentials (required when connector='binance'). Read-only API key/secret."
+    ),
+  metamask: METAMASK_CREDS.optional().describe(
+      "MetaMask/EVM config (required when connector='metamask'). Public address + Etherscan rate-limit key + chains."
+    ),
+  polymarket: POLYMARKET_CREDS.optional().describe(
+      "Polymarket config (required when connector='polymarket'). Public proxy wallet address; no secret."
+    ),
+  solana: SOLANA_CREDS.optional().describe(
+      "Solana config (required when connector='solana'). Public base58 address; no secret."
+    ),
 };
 
 export interface SetupConnectorArgs {

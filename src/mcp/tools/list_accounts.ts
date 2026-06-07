@@ -21,7 +21,10 @@ export const LIST_ACCOUNTS_DESCRIPTION = [
 ].join(" ");
 
 export const LIST_ACCOUNTS_INPUT_SCHEMA = {
-  connector: z.enum(["bybit", "binance", "metamask", "polymarket", "solana"]).optional(),
+  connector: z
+    .enum(["bybit", "binance", "metamask", "polymarket", "solana"])
+    .optional()
+    .describe("Filter to accounts of one connector. Omit to list every configured account."),
 };
 
 export interface ListAccountsArgs {

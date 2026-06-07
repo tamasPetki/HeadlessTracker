@@ -6,12 +6,12 @@
     "url": "https://github.com/tamasPetki/HeadlessTracker",
     "source": "github"
   },
-  "version": "1.0.11",
+  "version": "1.0.12",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "headless-tracker",
-      "version": "1.0.11",
+      "version": "1.0.12",
       "transport": {
         "type": "stdio"
       }

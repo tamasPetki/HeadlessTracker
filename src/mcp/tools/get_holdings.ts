@@ -46,13 +46,29 @@ export const GET_HOLDINGS_DESCRIPTION = [
   "Returns position data only. Not financial advice.",
 ].join(" ");
 
-// Schema kept simple (no chained .describe()) to avoid TS2589 inference depth
-// errors in @modelcontextprotocol/sdk's tool() generic. Descriptions for each
-// argument live in GET_HOLDINGS_DESCRIPTION above instead.
+// Per-parameter .describe() so the JSON Schema that MCP clients (and directory
+// indexers like Glama) read carries machine-readable parameter semantics, not
+// just the prose blob above. (An earlier note here claimed .describe() tripped
+// TS2589 in the SDK's tool() generic; it no longer does — verified by tsc.)
 export const GET_HOLDINGS_INPUT_SCHEMA = {
-  account_id: z.string().optional(),
-  asset_class: z.enum(["crypto", "stock", "prediction", "cash"]).optional(),
-  currency: z.enum(["USD", "EUR", "GBP", "HUF"]).optional(),
+  account_id: z
+    .string()
+    .optional()
+    .describe(
+      "Scope to one account by id, e.g. 'metamask:0xabc123...' or 'bybit:UNIFIED'. Omit to query ALL configured accounts. Get valid ids from list_accounts."
+    ),
+  asset_class: z
+    .enum(["crypto", "stock", "prediction", "cash"])
+    .optional()
+    .describe(
+      "Scope to one asset class. 'prediction' = Polymarket conditional tokens; 'cash' = stablecoin/fiat balances. Omit for all classes."
+    ),
+  currency: z
+    .enum(["USD", "EUR", "GBP", "HUF"])
+    .optional()
+    .describe(
+      "Display currency for value/currentPrice/avgCost (default 'USD'). Non-USD converts via live FX; the rate and source appear in meta.fx. Display-only — underlying data is unchanged."
+    ),
 };
 
 export interface GetHoldingsArgs {

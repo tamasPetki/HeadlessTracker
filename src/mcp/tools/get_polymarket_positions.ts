@@ -45,9 +45,22 @@ export const GET_POLYMARKET_POSITIONS_DESCRIPTION = [
 ].join(" ");
 
 export const GET_POLYMARKET_POSITIONS_INPUT_SCHEMA = {
-  account_id: z.string().optional(),
-  group_by_event: z.boolean().optional(),
-  resolved_only: z.boolean().optional(),
+  account_id: z
+    .string()
+    .optional()
+    .describe("Scope to one Polymarket account if several are configured. Omit for all."),
+  group_by_event: z
+    .boolean()
+    .optional()
+    .describe(
+      "Default true: groups Yes+No outcomes of the same market into one event row. Set false for one row per asset/outcome."
+    ),
+  resolved_only: z
+    .boolean()
+    .optional()
+    .describe(
+      "Default false (return all positions). Set true to return only redeemable positions in markets that have already resolved."
+    ),
 };
 
 export interface GetPolymarketPositionsArgs {

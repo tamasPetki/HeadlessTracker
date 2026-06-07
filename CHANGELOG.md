@@ -2,6 +2,14 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.12 — 2026-06-07
+
+Makes every tool's parameters self-describing to the AI agents that call them.
+
+### Changed
+
+- **Every tool input parameter now carries a machine-readable description in its JSON Schema.** All 38 parameters across all 15 tools (and the credential sub-fields of `setup_connector`) previously had bare types — the per-argument semantics lived only in the prose tool description, which an MCP host parses far less reliably than the schema's own `description` fields. Each parameter now has a concise `.describe()`: what it scopes, defaults, accepted shorthands, and caveats (e.g. `get_pnl.timeframe` explains the windowDelta approximation; `get_transactions.since` documents the shorthand-or-epoch-ms forms; `setup_connector`'s credential fields note that each is read-only). This is what Claude reads to call the tools correctly, so it directly reduces malformed calls and wrong-parameter guesses. A long-standing code comment claimed `.describe()` tripped a TypeScript `TS2589` "excessively deep" error in the MCP SDK's `tool()` generic; that is no longer true and was verified clean, so the workaround that suppressed all parameter docs is gone. No runtime behavior change.
+
 ## v1.0.11 — 2026-06-06
 
 Recovers automatically from a transient network blip instead of failing the account.

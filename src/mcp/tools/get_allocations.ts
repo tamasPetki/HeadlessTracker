@@ -33,8 +33,18 @@ export const GET_ALLOCATIONS_DESCRIPTION = [
 ].join(" ");
 
 export const GET_ALLOCATIONS_INPUT_SCHEMA = {
-  by: z.enum(["asset_class", "connector", "account", "chain", "symbol"]).optional(),
-  top: z.number().int().positive().optional(),
+  by: z
+    .enum(["asset_class", "connector", "account", "chain", "symbol"])
+    .optional()
+    .describe(
+      "Dimension to group USD value by (default 'asset_class'). 'chain' is only meaningful for MetaMask holdings; 'symbol' is best for top-N concentration analysis."
+    ),
+  top: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Limit to the top N rows by value (e.g. 10 for biggest positions). Omit for no limit."),
 };
 
 export interface GetAllocationsArgs {

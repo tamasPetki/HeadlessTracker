@@ -34,8 +34,17 @@ export const ADD_WALLET_ADDRESS_DESCRIPTION = [
 // Accept either an EVM 0x address or a Solana base58 address. The connector
 // validates the address format against its own creds shape downstream.
 export const ADD_WALLET_ADDRESS_INPUT_SCHEMA = {
-  account_id: z.string(),
-  address: z.string().min(32),
+  account_id: z
+    .string()
+    .describe(
+      "Id of the existing MetaMask or Solana account to add the address to (e.g. 'metamask:0xabc...' or 'solana:Abc...'). The new address inherits the parent's settings."
+    ),
+  address: z
+    .string()
+    .min(32)
+    .describe(
+      "The wallet address to add: an EVM 0x-hex address (40 hex chars) for MetaMask accounts, or a base58 address (32-44 chars) for Solana accounts. Public on-chain identifier, no secret."
+    ),
 };
 
 export interface AddWalletAddressArgs {
@@ -124,7 +133,11 @@ export const REMOVE_ACCOUNT_DESCRIPTION = [
 ].join(" ");
 
 export const REMOVE_ACCOUNT_INPUT_SCHEMA = {
-  account_id: z.string(),
+  account_id: z
+    .string()
+    .describe(
+      "Id of the account to delete (e.g. 'bybit:UNIFIED', 'metamask:0xabc...'). ONE-WAY: removes the account and its keychain credentials. Confirm with the user first."
+    ),
 };
 
 export interface RemoveAccountArgs {

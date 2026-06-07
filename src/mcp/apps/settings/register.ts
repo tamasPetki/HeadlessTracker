@@ -60,7 +60,10 @@ export function registerSettingsApp(server: McpServer): void {
       title: "Settings",
       description: RENDER_SETTINGS_DESCRIPTION,
       inputSchema: {
-        tab: z.enum(["accounts", "add-account", "wallets", "tokens"]).optional(),
+        tab: z
+          .enum(["accounts", "add-account", "wallets", "tokens"])
+          .optional()
+          .describe("Initial active tab (default 'accounts'). The user can switch tabs live in the panel."),
       },
       _meta: { ui: { resourceUri: SETTINGS_RESOURCE_URI } },
     },

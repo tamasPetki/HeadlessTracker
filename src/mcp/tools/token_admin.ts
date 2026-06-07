@@ -33,11 +33,25 @@ export const ADD_CUSTOM_TOKEN_DESCRIPTION = [
 ].join(" ");
 
 export const ADD_CUSTOM_TOKEN_INPUT_SCHEMA = {
-  account_id: z.string(),
-  chain_id: z.number().int().positive(),
-  contract: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
-  symbol: z.string().min(1).max(20),
-  decimals: z.number().int().min(0).max(36),
+  account_id: z
+    .string()
+    .describe("Target MetaMask account id (e.g. 'metamask:0xabc...')."),
+  chain_id: z
+    .number()
+    .int()
+    .positive()
+    .describe("EVM chain id: 1=Ethereum, 137=Polygon, 56=BSC, 8453=Base, 42161=Arbitrum, 10=Optimism."),
+  contract: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/)
+    .describe("ERC-20 contract address: 0x-prefixed, 40 hex chars. Public on-chain data, no secret."),
+  symbol: z.string().min(1).max(20).describe("Token ticker symbol, 1-20 chars (e.g. 'ARB')."),
+  decimals: z
+    .number()
+    .int()
+    .min(0)
+    .max(36)
+    .describe("Token decimals (integer 0-36; most ERC-20s use 18, USDC/USDT use 6)."),
 };
 
 export interface AddCustomTokenArgs {
@@ -84,9 +98,16 @@ export const REMOVE_CUSTOM_TOKEN_DESCRIPTION = [
 ].join(" ");
 
 export const REMOVE_CUSTOM_TOKEN_INPUT_SCHEMA = {
-  account_id: z.string(),
-  chain_id: z.number().int().positive(),
-  contract: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+  account_id: z.string().describe("Target MetaMask account id (e.g. 'metamask:0xabc...')."),
+  chain_id: z
+    .number()
+    .int()
+    .positive()
+    .describe("EVM chain id the token is tracked on: 1=Ethereum, 137=Polygon, 56=BSC, 8453=Base, 42161=Arbitrum, 10=Optimism."),
+  contract: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/)
+    .describe("ERC-20 contract address to untrack: 0x-prefixed, 40 hex chars."),
 };
 
 export interface RemoveCustomTokenArgs {
@@ -122,7 +143,10 @@ export const LIST_CUSTOM_TOKENS_DESCRIPTION = [
 ].join(" ");
 
 export const LIST_CUSTOM_TOKENS_INPUT_SCHEMA = {
-  account_id: z.string().optional(),
+  account_id: z
+    .string()
+    .optional()
+    .describe("Filter to one MetaMask account id. Omit to list custom tokens across all accounts."),
 };
 
 export interface ListCustomTokensArgs {

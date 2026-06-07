@@ -61,8 +61,14 @@ export function registerDashboardApp(server: McpServer): void {
       title: "Portfolio Dashboard",
       description: RENDER_DASHBOARD_DESCRIPTION,
       inputSchema: {
-        currency: z.enum(["USD", "EUR", "GBP", "HUF"]).optional(),
-        tab: z.enum(["portfolio", "weekly", "risk"]).optional(),
+        currency: z
+          .enum(["USD", "EUR", "GBP", "HUF"])
+          .optional()
+          .describe("Initial display currency for the dashboard (default 'USD'). The user can switch it live in the panel."),
+        tab: z
+          .enum(["portfolio", "weekly", "risk"])
+          .optional()
+          .describe("Initial active tab (default 'portfolio'). The user can switch tabs live in the panel."),
       },
       _meta: { ui: { resourceUri: DASHBOARD_RESOURCE_URI } },
     },

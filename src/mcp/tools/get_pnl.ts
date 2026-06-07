@@ -79,11 +79,34 @@ export const GET_PNL_DESCRIPTION = [
 ].join(" ");
 
 export const GET_PNL_INPUT_SCHEMA = {
-  account_id: z.string().optional(),
-  timeframe: z.enum(["24h", "7d", "30d", "ytd", "all"]).optional(),
-  include_history: z.boolean().optional(),
-  method: z.enum(["fifo", "average"]).optional(),
-  currency: z.enum(["USD", "EUR", "GBP", "HUF"]).optional(),
+  account_id: z
+    .string()
+    .optional()
+    .describe("Scope to one account (e.g. 'bybit:UNIFIED'). Omit for P&L across all accounts."),
+  timeframe: z
+    .enum(["24h", "7d", "30d", "ytd", "all"])
+    .optional()
+    .describe(
+      "Default 'all'. Any non-'all' value adds a windowDelta block (current basket valued at historical vs current CoinGecko prices). APPROXIMATION: it does NOT account for trades within the window; surface that caveat. Daily granularity, so '24h' = since yesterday's close."
+    ),
+  include_history: z
+    .boolean()
+    .optional()
+    .describe(
+      "Default false. When true, also fetches transactions and runs a cost-basis ledger for honest realizedFromHistory per account (one extra round-trip each). Required to get Polymarket's real realized P&L (null otherwise)."
+    ),
+  method: z
+    .enum(["fifo", "average"])
+    .optional()
+    .describe(
+      "Cost-basis method when include_history=true (default 'fifo'). Use 'average' if the user says 'average/avg/weighted cost'. No effect when include_history=false."
+    ),
+  currency: z
+    .enum(["USD", "EUR", "GBP", "HUF"])
+    .optional()
+    .describe(
+      "Display currency for all numeric fields (default 'USD'). Non-USD converts via live FX; source/rate appear in meta.fx. Use for currency-consistent dashboards."
+    ),
 };
 
 export interface GetPnlArgs {
