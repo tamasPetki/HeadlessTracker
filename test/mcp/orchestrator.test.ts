@@ -500,4 +500,76 @@ describe("Orchestrator", () => {
     expect(result.data).toHaveLength(1);
     expect(result.data[0]!.symbol).toBe("BTC");
   });
+
+  test("a transient network_error is retried once and succeeds on the second attempt", async () => {
+    // network_error == fetch threw at the network layer (DNS / connection
+    // refused / dropped connection), the one clearly-transient kind. A single
+    // retry should convert a blip into a success.
+    setupAccount({ id: "bybit:UNIFIED", connectorId: "bybit", label: "B", createdAt: 1 });
+    let calls = 0;
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      retryBackoffMs: 0, // no real wait in tests
+      connectorOverrides: {
+        bybit: new StubConnector({
+          id: "bybit",
+          holdingsResult: () => {
+            calls++;
+            return calls === 1
+              ? err("network_error", "connection refused")
+              : ok([makeHolding({ accountId: "bybit:UNIFIED", symbol: "BTC" })]);
+          },
+        }),
+      },
+    });
+
+    const result = await orch.getHoldings(undefined);
+    expect(calls).toBe(2); // retried exactly once
+    expect(result.failures).toHaveLength(0);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]!.symbol).toBe("BTC");
+  });
+
+  test("a persistent network_error is retried once then surfaces as a failure", async () => {
+    setupAccount({ id: "bybit:UNIFIED", connectorId: "bybit", label: "B", createdAt: 1 });
+    const stub = new StubConnector({
+      id: "bybit",
+      holdingsResult: err("network_error", "connection refused"),
+    });
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      retryBackoffMs: 0,
+      connectorOverrides: { bybit: stub },
+    });
+
+    const result = await orch.getHoldings(undefined);
+    expect(stub.callCount.holdings).toBe(2); // one retry, no more
+    expect(result.data).toHaveLength(0);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]!.error).toContain("network_error");
+  });
+
+  test("non-transient errors (auth_failed) are NOT retried", async () => {
+    setupAccount({ id: "bybit:UNIFIED", connectorId: "bybit", label: "B", createdAt: 1 });
+    const stub = new StubConnector({
+      id: "bybit",
+      holdingsResult: err("auth_failed", "Bybit key invalid"),
+    });
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      retryBackoffMs: 0,
+      connectorOverrides: { bybit: stub },
+    });
+
+    const result = await orch.getHoldings(undefined);
+    expect(stub.callCount.holdings).toBe(1); // no retry on a non-transient error
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]!.error).toContain("auth_failed");
+  });
 });

@@ -2,6 +2,14 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.11 — 2026-06-06
+
+Recovers automatically from a transient network blip instead of failing the account.
+
+### Fixed
+
+- **A transient network error is now retried once before failing.** A connector that hit a momentary network failure — a dropped connection, a DNS hiccup, a connection refused — failed that account immediately, surfacing an error for what a single retry would have cleared. The orchestrator now retries once (after a short, abortable backoff) on a `network_error`, the one error kind that's returned uniformly and only when `fetch` itself throws at the network layer. It deliberately does **not** retry `upstream_error` (which mixes transient 5xx with non-transient 4xx and upstream logical errors), `rate_limited` (429s already back off in the price layer; retrying would only hammer a limited endpoint), `auth_failed`, or `schema_mismatch` — none of which fix themselves. The retry is bounded by the v1.0.10 request deadline, so it can never push a call past the timeout, and it still falls back to stale cache if both attempts fail.
+
 ## v1.0.10 — 2026-06-06
 
 Stops a hung upstream from stalling a tool call indefinitely.

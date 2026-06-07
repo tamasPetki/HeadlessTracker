@@ -39,6 +39,29 @@ const CONNECTOR_FACTORIES: Record<ConnectorId, () => Connector> = {
 const DEFAULT_REQUEST_TIMEOUT_MS =
   Number(process.env.HEADLESS_TRACKER_REQUEST_TIMEOUT_MS) || 30_000;
 
+// Backoff before the single retry on a transient network_error (below). Short:
+// a network_error fails fast at the network layer (connection refused, DNS,
+// dropped connection), so a brief pause is enough to clear a blip without eating
+// much of the request deadline.
+const DEFAULT_RETRY_BACKOFF_MS = 250;
+
+// A delay that resolves early if the signal aborts, so a retry backoff never
+// outlives a cancelled or timed-out request.
+function delayAbortable(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true }
+    );
+  });
+}
+
 export interface OrchestratorOptions {
   accountStore?: AccountStore;
   vault?: Vault;
@@ -49,6 +72,9 @@ export interface OrchestratorOptions {
   // Per-account fetch deadline in ms. Defaults to DEFAULT_REQUEST_TIMEOUT_MS
   // (env-overridable). Exposed so tests can use a short timeout.
   requestTimeoutMs?: number;
+  // Backoff before the single transient-error retry. Defaults to
+  // DEFAULT_RETRY_BACKOFF_MS. Exposed so tests can set 0 for speed.
+  retryBackoffMs?: number;
 }
 
 interface FetchOptions {
@@ -71,12 +97,14 @@ export class Orchestrator {
   // In-flight Promise dedup (eng review 4A.2). Keyed by cache key.
   private inFlight: Map<string, Promise<unknown>> = new Map();
   private requestTimeoutMs: number;
+  private retryBackoffMs: number;
 
   constructor(opts: OrchestratorOptions = {}) {
     this.accountStore = opts.accountStore ?? defaultAccountStore();
     this.vault = opts.vault ?? defaultVault();
     this.cache = opts.cache ?? defaultCache();
     this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.retryBackoffMs = opts.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
     if (opts.connectorOverrides) {
       for (const [id, conn] of Object.entries(opts.connectorOverrides)) {
         if (conn) this.connectors.set(id as ConnectorId, conn);
@@ -246,7 +274,7 @@ export class Orchestrator {
         // deadline regardless of per-connector correctness. The orphaned fetcher
         // gets a no-op .catch so a late rejection (after the race has settled)
         // doesn't surface as an unhandledRejection.
-        const fetcherPromise = fetcher(ctx, connector);
+        const fetcherPromise = this.fetchWithRetry(fetcher, ctx, connector, signal);
         fetcherPromise.catch(() => {});
         const deadline = new Promise<Result<T[]>>((resolve) => {
           const onTimeout = () =>
@@ -317,6 +345,33 @@ export class Orchestrator {
 
     this.inFlight.set(cacheKey, promise);
     return promise;
+  }
+
+  /**
+   * Run the connector fetch, retrying once on a transient `network_error`.
+   *
+   * Only `network_error` is retried: it is returned uniformly (and only) when
+   * `fetch` itself throws — DNS failure, connection refused, a dropped
+   * connection — which is exactly the kind of blip a single retry clears. We do
+   * NOT retry `upstream_error` (it mixes transient 5xx with non-transient 4xx
+   * and upstream logical errors), `rate_limited` (prices.ts already backs off on
+   * 429; retrying would just hammer a limited endpoint), `auth_failed`, or
+   * `schema_mismatch` (none of which fix themselves). The backoff is abortable,
+   * and the whole call is wrapped by the deadline race in fetchForAccount, so
+   * the retry can never push total time past the request timeout.
+   */
+  private async fetchWithRetry<T>(
+    fetcher: (ctx: ConnectorContext, conn: Connector) => Promise<Result<T[]>>,
+    ctx: ConnectorContext,
+    connector: Connector,
+    signal: AbortSignal
+  ): Promise<Result<T[]>> {
+    let result = await fetcher(ctx, connector);
+    if (!result.ok && result.error.kind === "network_error" && !signal.aborted) {
+      await delayAbortable(this.retryBackoffMs, signal);
+      if (!signal.aborted) result = await fetcher(ctx, connector);
+    }
+    return result;
   }
 
   /**
