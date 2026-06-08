@@ -33,6 +33,7 @@ import { executeGetTransactions } from "../src/mcp/tools/get_transactions.ts";
 import type { Account } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
 import { finalizeAccountSetup } from "../src/setup-finalize.ts";
+import { DEMO_HOLDINGS, DEMO_PROMPTS, DEMO_TOTAL_USD } from "../src/demo-data.ts";
 
 // Read from package.json (single source of truth) so the CLI banner can't drift
 // from the published version, same as the MCP server's reported version.
@@ -52,6 +53,7 @@ function printHelp(): void {
 
 Usage:
   headless-tracker                        Start the MCP stdio server (use this in claude_desktop_config.json)
+  headless-tracker demo                   See a sample portfolio in one command (no accounts, no API keys)
   headless-tracker setup [connector]      Configure credentials for a connector (interactive)
   headless-tracker list-accounts          Show configured accounts (no secrets shown)
   headless-tracker show holdings [...]    Print current holdings (text table, no Claude required)
@@ -875,6 +877,59 @@ async function show(thing: string | undefined, rest: string[]): Promise<void> {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// `demo` — zero-credential walkthrough. Renders a sample multi-venue portfolio
+// (src/demo-data.ts) through the SAME table/format helpers as `show holdings`,
+// so what you see here is exactly what the tool returns once you connect real,
+// read-only accounts. The point: see the value in one command, no API keys.
+// ──────────────────────────────────────────────────────────────────────────────
+
+async function runDemo(): Promise<void> {
+  const USD = "USD" as const;
+  console.log(`\nheadless-tracker demo  ·  sample portfolio (no accounts, no API keys)`);
+  console.log("─".repeat(64));
+  console.log("Illustrative data, not a real account. This is exactly what your AI");
+  console.log("host sees when it queries HeadlessTracker over MCP.\n");
+
+  const rows = DEMO_HOLDINGS.map((h) => [
+    h.accountId,
+    h.symbol,
+    h.assetClass,
+    fmtQty(h.quantity),
+    fmtMoney(h.value, USD),
+    h.currentPrice !== undefined ? fmtMoney(h.currentPrice, USD) : "—",
+  ]);
+  console.log(renderTable(["account", "symbol", "class", "qty", "value", "price"], rows));
+
+  const total = DEMO_TOTAL_USD;
+  const venues = new Set(DEMO_HOLDINGS.map((h) => h.accountId)).size;
+  console.log(`\nTotal: ${fmtMoney(total, USD)}  (${DEMO_HOLDINGS.length} positions across ${venues} venues)`);
+
+  // Allocation by asset class — the "how is it split" value prop, drawn as a bar.
+  const byClass = new Map<string, number>();
+  for (const h of DEMO_HOLDINGS) {
+    byClass.set(h.assetClass, (byClass.get(h.assetClass) ?? 0) + (h.value ?? 0));
+  }
+  console.log("\nAllocation by asset class:");
+  for (const [cls, val] of [...byClass.entries()].sort((a, b) => b[1] - a[1])) {
+    const pct = ((val / total) * 100).toFixed(1);
+    const bar = "█".repeat(Math.max(1, Math.round((val / total) * 24)));
+    console.log(`  ${cls.padEnd(11)} ${fmtMoney(val, USD).padStart(9)}  ${pct.padStart(5)}%  ${bar}`);
+  }
+
+  // Sell the agent experience, not just a table: each question maps to one tool.
+  console.log("\nAsk your AI in plain English (each maps to one MCP tool):");
+  for (const p of DEMO_PROMPTS) {
+    console.log(`  "${p.ask}"`);
+    console.log(`      → ${p.tool}`);
+  }
+
+  console.log("\nConnect your own (read-only keys, runs locally on your machine):");
+  console.log("  headless-tracker setup bybit | binance | metamask | solana | polymarket");
+  console.log("  then point Claude Desktop at it — see `headless-tracker help`.");
+  console.log("\nData aggregation only — not financial advice.\n");
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const cmd = args[0];
@@ -894,6 +949,8 @@ async function main(): Promise<void> {
       return;
     case "setup":
       return setup(args[1]);
+    case "demo":
+      return runDemo();
     case "list-accounts":
       return listAccounts();
     case "show":

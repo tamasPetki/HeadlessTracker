@@ -10,7 +10,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** Production-ready and live on npm (version badge above). Five connectors (Bybit, Binance, MetaMask/EVM, Solana, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 323-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
+**Status:** Production-ready and live on npm (version badge above). Five connectors (Bybit, Binance, MetaMask/EVM, Solana, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 356-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
 
 <details>
 <summary><b>Full feature list</b></summary>
@@ -24,7 +24,7 @@ The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate das
 - **Custom ERC-20 token lists**; FIFO + Average Cost on transaction history
 - **Multi-currency display** (USD/EUR/GBP/HUF); CoinGecko + Jupiter spot and historical prices
 - **Time-windowed PnL** (`--timeframe=24h|7d|30d|ytd`)
-- **323-test suite**; runs under plain Node or Bun
+- **356-test suite**; runs under plain Node or Bun
 
 See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 </details>
@@ -41,6 +41,31 @@ Connects to your accounts (read-only), normalizes everything into a single schem
 The AI host generates the chart, the table, the breakdown. You don't build a UI.
 
 ## Try it in 60 seconds (no API keys)
+
+**The zero-setup version — one command, no accounts, no keys, not even an address.** See a full sample portfolio (five venues; crypto + cash + prediction markets) rendered exactly as your AI host receives it:
+
+```bash
+npx headless-tracker demo
+```
+
+```text
+account                 symbol               class       qty       value    price
+──────────────────────  ───────────────────  ──────────  ────────  ───────  ───────
+bybit:UNIFIED           BTC                  crypto      0.420000  $25704   $61200
+binance:spot            SOL                  crypto      95.0000   $14440   $152.00
+metamask:0xd8d2…f1a3    WBTC                 crypto      0.150000  $9150    $61000
+solana:7vfC…Wd9k        JUP                  crypto      1800.00   $1656    $0.9200
+polymarket:0x9c1a…7b20  RATE-CUT-2026 (YES)  prediction  1500.00   $930.00  $0.6200
+…
+Total: $104126  (15 positions across 5 venues)
+
+Allocation by asset class:
+  crypto         $88024   84.5%  ████████████████████
+  cash           $14900   14.3%  ███
+  prediction      $1202    1.2%  █
+```
+
+It also prints the plain-English questions you'd ask Claude ("what do I own across everything?", "how is it split?") mapped to the MCP tool that answers each. When you want **your own** numbers, it's the same loop with a real address or read-only key:
 
 You shouldn't have to hand a new tool your exchange keys just to find out whether it's any good. Solana and Polymarket read **public on-chain addresses**, so you can point HeadlessTracker at any wallet you can see (your own included) with zero credentials.
 
@@ -409,7 +434,7 @@ Building from source uses [Bun 1.3+](https://bun.sh). End users don't need this 
 git clone https://github.com/tamasPetki/HeadlessTracker.git
 cd headless-tracker
 bun install
-bun test                              # 323 tests, ~5s
+bun test                              # 356 tests, ~5s
 bun run typecheck                     # bun --bun tsc --noEmit
 bun run build:apps                    # bundle the dashboard MCP App into dist/mcp-apps/
 bun run build                         # build the Node-runnable dist/ (what npm ships)

@@ -2,6 +2,14 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.13 — 2026-06-07
+
+Adds a zero-credential `demo` so anyone can see what the tool does in one command.
+
+### Added
+
+- **`headless-tracker demo` — a one-command sample portfolio with no accounts, no API keys, not even an address.** Until now the lowest-friction way to evaluate the tool still required pointing it at a public wallet; a brand-new user had nothing to look at without doing setup first. `demo` renders a realistic five-venue sample portfolio (Bybit, Binance, a MetaMask EVM wallet, a Solana wallet, and Polymarket positions — crypto, cash, and prediction markets) through the **same** table and money formatters as `show holdings`, so what you see in the demo is exactly the shape the tool returns once you connect real read-only accounts. It also prints an allocation-by-asset-class breakdown and the plain-English questions an AI host would ask ("what do I own across everything?", "how is it split?") each mapped to the MCP tool that answers it, so the demo conveys the agent experience and not just a terminal table. The sample dataset lives in a separate, typed, unit-tested module (`src/demo-data.ts`) so it can't silently drift from the `Holding` contract or lose its "not financial advice" disclaimer.
+
 ## v1.0.12 — 2026-06-07
 
 Makes every tool's parameters self-describing to the AI agents that call them.
