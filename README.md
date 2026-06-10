@@ -8,6 +8,12 @@
 
 > MCP server for portfolio tracking across crypto exchanges, on-chain wallets, and prediction markets. Query your portfolio from any MCP-compatible AI host (Claude Desktop, Claude Code, Cursor, ChatGPT).
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/demo.png" alt="npx headless-tracker demo — a sample five-venue portfolio (Bybit, Binance, MetaMask, Solana, Polymarket) rendered in the terminal with no accounts and no API keys" width="720">
+</p>
+
+<p align="center"><sub>↑ Real output of <code>npx headless-tracker demo</code> — five venues, no accounts, no API keys. Then ask your AI host about it.</sub></p>
+
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
 **Status:** Production-ready and live on npm (version badge above). Five connectors (Bybit, Binance, MetaMask/EVM, Solana, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 356-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.

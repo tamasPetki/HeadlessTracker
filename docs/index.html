@@ -347,7 +347,7 @@
     <div class="trust-inner">
       <span class="trust-item"><b>Live</b> on npm</span>
       <span class="trust-item"><b>5</b> connectors</span>
-      <span class="trust-item"><b>323</b> tests</span>
+      <span class="trust-item"><b>356</b> tests</span>
       <span class="trust-item">Read-only by design</span>
       <span class="trust-item">Local-first, no telemetry</span>
       <span class="trust-item">TypeScript · MIT</span>
@@ -537,6 +537,16 @@ headless-tracker show holdings</code></pre>
       <div class="eyebrow">Quick start</div>
       <h2>Running in about five minutes.</h2>
       <p class="lead">Runs under plain Node 22.5+ (or Bun). No clone, no build step. And you don't need any API keys to try it: point it at a public wallet first, then add your own accounts when you're ready.</p>
+    </div>
+    <div style="text-align:center;margin:0 0 42px;">
+      <div class="install-block" style="display:inline-flex">
+        <code>npx headless-tracker demo</code>
+        <button class="copy-btn" onclick="navigator.clipboard.writeText('npx headless-tracker demo').then(()=>{this.textContent='Copied';setTimeout(()=>{this.textContent='Copy'},1500)})">Copy</button>
+      </div>
+      <a href="https://github.com/tamasPetki/HeadlessTracker#readme" aria-label="View HeadlessTracker on GitHub">
+        <img src="demo.png" alt="npx headless-tracker demo: a sample five-venue portfolio (Bybit, Binance, MetaMask, Solana, Polymarket) rendered in the terminal with no accounts and no API keys" loading="lazy" style="width:100%;max-width:660px;border-radius:14px;display:block;margin:18px auto 0;">
+      </a>
+      <p class="step-note" style="margin-top:14px;">Zero credentials, not even an address &mdash; a full five-venue sample through the same renderer the real tool uses. The fastest way to see what your AI host reads.</p>
     </div>
     <pre><code><span class="hl-comment"># 1. Install (or skip this and use npx in the config below)</span>
 npm i -g headless-tracker
