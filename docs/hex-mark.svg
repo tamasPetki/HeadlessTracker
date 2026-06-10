@@ -1,0 +1,30 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#13203a"/>
+      <stop offset="100%" stop-color="#0a0f1d"/>
+    </radialGradient>
+    <linearGradient id="hexstroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#34e0e8"/>
+      <stop offset="100%" stop-color="#1aa3d6"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- pointy-top hexagon (the "Hex") -->
+  <polygon points="256,86 403,171 403,341 256,426 109,341 109,171"
+           fill="none" stroke="url(#hexstroke)" stroke-width="22"
+           stroke-linejoin="round" filter="url(#glow)"/>
+
+  <!-- single lovable-robot eye -->
+  <circle cx="256" cy="256" r="44" fill="#34e0e8" filter="url(#glow)"/>
+  <circle cx="241" cy="241" r="13" fill="#eafdff"/>
+</svg>
