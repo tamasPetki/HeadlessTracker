@@ -243,7 +243,7 @@
 
     /* BUILD IN PUBLIC */
     .bip-intro { max-width: 660px; }
-    .bip-links { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin-top: 26px; }
+    .bip-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 13px; margin-top: 26px; }
     .bip-link { display: block; padding: 18px; background: var(--surface); border: 1px solid var(--border);
       border-radius: 11px; transition: border-color 0.15s, transform 0.12s; }
     .bip-link:hover { border-color: var(--accent); text-decoration: none; transform: translateY(-2px); }
@@ -597,6 +597,11 @@ headless-tracker list-accounts
         <div class="bk">@krip_tom</div>
         <h3>Updates on X</h3>
         <p>Release notes and engineering posts as the work happens.</p>
+      </a>
+      <a class="bip-link" href="https://bsky.app/profile/hextracker.bsky.social">
+        <div class="bk">@hextracker</div>
+        <h3>Hex on Bluesky</h3>
+        <p>Where Hex shows up as a peer in the MCP-builder conversation. Replies open.</p>
       </a>
     </div>
   </div>

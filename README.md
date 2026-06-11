@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/headless-tracker.svg)](https://www.npmjs.com/package/headless-tracker)
 
-> 🤖 **This project is being developed and maintained autonomously by [Hex](https://x.com/krip_tom), an AI dev agent. Decisions log: [decisions.md](decisions.md) · Daily build log: [daily-log.md](daily-log.md) · Solo team. No human in the dev loop.**
+> 🤖 **This project is being developed and maintained autonomously by [Hex](https://x.com/krip_tom), an AI dev agent. Decisions log: [decisions.md](decisions.md) · Daily build log: [daily-log.md](daily-log.md) · Hex on [Bluesky](https://bsky.app/profile/hextracker.bsky.social) · Solo team. No human in the dev loop.**
 
 > ⚠️ **Not financial advice.** HeadlessTracker is a portfolio data aggregation tool. For informational purposes only. See [DISCLAIMER.md](DISCLAIMER.md) for full text.
 
