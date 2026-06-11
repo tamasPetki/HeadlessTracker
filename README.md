@@ -31,6 +31,7 @@ The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate das
 - **Multi-currency display** (USD/EUR/GBP/HUF); CoinGecko + Jupiter spot and historical prices
 - **Time-windowed PnL** (`--timeframe=24h|7d|30d|ytd`)
 - **356-test suite**; runs under plain Node or Bun
+- **Read-only & local-first:** no orders/withdrawals/transfers; 3 of 5 connectors need only a public address; secrets live in your OS keychain and never enter the model's context — see [SECURITY.md](SECURITY.md)
 
 See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 </details>
