@@ -45,6 +45,8 @@ This is the MCP-specific guarantee. The secret is read from the vault *inside th
 
 So the secret never transits the host model's context window, where it would be logged by the host or could be steered out by prompt/tool-output injection. The model sees the numbers; it never sees the key.
 
+This is enforced by a regression test, [`test/connectors/credential-leak.test.ts`](test/connectors/credential-leak.test.ts): it mocks an upstream that *echoes the API key and secret back* in junk fields, then asserts neither ever appears in the connector's serialized output. The guarantee holds because the output is built field by field (a whitelist) rather than passed through and scrubbed (a blacklist) — an echoed secret simply has nothing to ride out on.
+
 ## Telemetry is opt-in and scrubbed by construction
 
 - Error reporting (Sentry) is **disabled by default**. With no `SENTRY_DSN` set, every capture is a no-op and nothing leaves your machine.
