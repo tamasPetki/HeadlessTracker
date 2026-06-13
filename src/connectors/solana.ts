@@ -24,7 +24,7 @@ import type { Holding, Result, Transaction } from "../types.ts";
 import { err, ok } from "../types.ts";
 
 const DEFAULT_RPC = "https://api.mainnet-beta.solana.com";
-const JUPITER_PRICE_API = "https://api.jup.ag/price/v2";
+const JUPITER_PRICE_API = "https://api.jup.ag/price/v3";
 const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const LAMPORTS_PER_SOL = 1_000_000_000; // 9 decimals
 
@@ -142,14 +142,17 @@ async function rpcCall<T>(
   return ok(json.result);
 }
 
+// Price API v3 response: flat object keyed by mint, `usdPrice` as a number.
+// (v2 wrapped entries under `data` with a string `price`; v2 was retired and
+// now 404s — see https://dev.jup.ag/docs/price-api/v3.)
 interface JupiterPriceResponse {
-  data?: Record<string, { id: string; price?: string | number } | null>;
+  [mint: string]: { usdPrice?: number; priceChange24h?: number } | undefined;
 }
 
-// Fetch USD prices for a batch of mint addresses from Jupiter Price API v2.
+// Fetch USD prices for a batch of mint addresses from Jupiter Price API v3.
 // Returns a Map mint→price (USD). Mints with no price are simply absent.
-// Jupiter accepts comma-separated ids; we batch into chunks of 100 to stay
-// under their request size limit.
+// Jupiter accepts comma-separated ids; v3 caps a request at 50 ids, so we
+// batch into chunks of 50.
 async function fetchJupiterPrices(
   mints: string[],
   signal?: AbortSignal
@@ -157,7 +160,7 @@ async function fetchJupiterPrices(
   const out = new Map<string, number>();
   if (mints.length === 0) return out;
 
-  const BATCH = 100;
+  const BATCH = 50;
   for (let i = 0; i < mints.length; i += BATCH) {
     const slice = mints.slice(i, i + BATCH);
     const url = `${JUPITER_PRICE_API}?ids=${slice.join(",")}`;
@@ -176,11 +179,10 @@ async function fetchJupiterPrices(
     } catch {
       continue;
     }
-    if (!json.data) continue;
     for (const mint of slice) {
-      const entry = json.data[mint];
-      if (!entry || entry.price == null) continue;
-      const price = typeof entry.price === "string" ? parseFloat(entry.price) : entry.price;
+      const entry = json[mint];
+      if (!entry || entry.usdPrice == null) continue;
+      const price = entry.usdPrice;
       if (Number.isFinite(price) && price > 0) {
         out.set(mint, price);
       }

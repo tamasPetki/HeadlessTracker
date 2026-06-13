@@ -87,13 +87,11 @@ describe("SolanaConnector.fetchHoldings (mocked RPC + Jupiter)", () => {
     // Mock RPC + Jupiter API.
     globalThis.fetch = (async (input: string | URL, init?: RequestInit): Promise<Response> => {
       const url = input.toString();
-      if (url.startsWith("https://api.jup.ag/price/v2")) {
+      if (url.startsWith("https://api.jup.ag/price/v3")) {
         return new Response(
           JSON.stringify({
-            data: {
-              "So11111111111111111111111111111111111111112": { id: "So111…", price: "150" },
-              EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { id: "EPjF…", price: "1" },
-            },
+            "So11111111111111111111111111111111111111112": { usdPrice: 150 },
+            EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { usdPrice: 1 },
           }),
           { status: 200 }
         );
@@ -179,14 +177,12 @@ describe("SolanaConnector.fetchHoldings (mocked RPC + Jupiter)", () => {
     const UNKNOWN_MINT = "Drk2bL5UU6kfFPCQjcZmZQNVqZBhfZ9XnRmVcRfZdfZ9";
     globalThis.fetch = (async (input: string | URL, init?: RequestInit): Promise<Response> => {
       const url = input.toString();
-      if (url.startsWith("https://api.jup.ag/price/v2")) {
+      if (url.startsWith("https://api.jup.ag/price/v3")) {
         return new Response(
           JSON.stringify({
-            data: {
-              "So11111111111111111111111111111111111111112": { id: "wsol", price: "0" },
-              [UNKNOWN_MINT]: { id: "unk", price: "0.001" },
-              EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { id: "usdc", price: "1" },
-            },
+            "So11111111111111111111111111111111111111112": { usdPrice: 0 },
+            [UNKNOWN_MINT]: { usdPrice: 0.001 },
+            EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { usdPrice: 1 },
           }),
           { status: 200 }
         );
@@ -264,12 +260,10 @@ describe("SolanaConnector.fetchHoldings (mocked RPC + Jupiter)", () => {
     let getBalanceCalls = 0;
     globalThis.fetch = (async (input: string | URL, init?: RequestInit): Promise<Response> => {
       const url = input.toString();
-      if (url.startsWith("https://api.jup.ag/price/v2")) {
+      if (url.startsWith("https://api.jup.ag/price/v3")) {
         return new Response(
           JSON.stringify({
-            data: {
-              "So11111111111111111111111111111111111111112": { id: "wsol", price: "100" },
-            },
+            "So11111111111111111111111111111111111111112": { usdPrice: 100 },
           }),
           { status: 200 }
         );
@@ -308,8 +302,8 @@ describe("SolanaConnector.fetchHoldings (mocked RPC + Jupiter)", () => {
   test("returns ok([]) for fully empty wallet", async () => {
     globalThis.fetch = (async (input: string | URL, init?: RequestInit): Promise<Response> => {
       const url = input.toString();
-      if (url.startsWith("https://api.jup.ag/price/v2")) {
-        return new Response(JSON.stringify({ data: {} }), { status: 200 });
+      if (url.startsWith("https://api.jup.ag/price/v3")) {
+        return new Response(JSON.stringify({}), { status: 200 });
       }
       const body = init?.body ? JSON.parse(String(init.body)) : { method: "" };
       if (body.method === "getBalance") {
