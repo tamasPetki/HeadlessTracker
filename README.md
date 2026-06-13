@@ -16,7 +16,7 @@
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** Production-ready and live on npm (version badge above). Five connectors (Bybit, Binance, MetaMask/EVM, Solana, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 356-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
+**Status:** Production-ready and live on npm (version badge above). Five connectors (Bybit, Binance, MetaMask/EVM, Solana, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 377-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
 
 <details>
 <summary><b>Full feature list</b></summary>
@@ -30,7 +30,7 @@ The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate das
 - **Custom ERC-20 token lists**; FIFO + Average Cost on transaction history
 - **Multi-currency display** (USD/EUR/GBP/HUF); CoinGecko + Jupiter spot and historical prices
 - **Time-windowed PnL** (`--timeframe=24h|7d|30d|ytd`)
-- **356-test suite**; runs under plain Node or Bun
+- **377-test suite**; runs under plain Node or Bun
 - **Read-only & local-first:** no orders/withdrawals/transfers; 3 of 5 connectors need only a public address; secrets live in your OS keychain and never enter the model's context — see [SECURITY.md](SECURITY.md)
 
 See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
@@ -457,7 +457,7 @@ Building from source uses [Bun 1.3+](https://bun.sh). End users don't need this 
 git clone https://github.com/tamasPetki/HeadlessTracker.git
 cd headless-tracker
 bun install
-bun test                              # 356 tests, ~5s
+bun test                              # 377 tests, ~5s
 bun run typecheck                     # bun --bun tsc --noEmit
 bun run build:apps                    # bundle the dashboard MCP App into dist/mcp-apps/
 bun run build                         # build the Node-runnable dist/ (what npm ships)
