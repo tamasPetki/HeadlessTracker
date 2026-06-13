@@ -103,6 +103,22 @@ Total: $3756  (3 positions across 1 accounts)
 
 That is the whole loop: install, point at a public address, see normalized holdings. When you want your private accounts (Bybit, Binance), `setup` those too. Every connector uses **read-only** credentials, kept in your OS keychain, never written to disk and never sent anywhere except the exchange's own API. Then [wire it into Claude](#3-wire-up-claude-desktop) and ask *"what do I own?"* to get the same data as a chat-native dashboard.
 
+### Non-interactive setup (scripts, Docker, CI)
+
+`setup` also runs without prompts — pass flags, and keep any secret in an environment variable (never on the command line, so it stays out of your shell history):
+
+```bash
+# public-address connectors: everything via flags, zero secrets
+headless-tracker setup solana --address=<base58> --dust=0.5
+headless-tracker setup polymarket --proxy-wallet=0x... 
+
+# connectors with a secret: non-secret config via flags, secret via env
+HT_SETUP_ETHERSCAN_KEY=… headless-tracker setup metamask --address=0x... --chains=1,137
+HT_SETUP_API_KEY=… HT_SETUP_API_SECRET=… headless-tracker setup bybit --account-type=UNIFIED --also=FUND
+```
+
+**Headless / no OS keychain** (Docker, WSL, many Linux servers, CI): there's no Secret Service to write to, so `setup` registers the account and prints the exact `HEADLESS_TRACKER_<CONNECTOR>_<ACCOUNT>` env var to set with a JSON credential object — e.g. `HEADLESS_TRACKER_SOLANA_<ADDR>='{"address":"…","dustThresholdUsd":0.5}'`. Set it in your MCP server's environment and the data tools read credentials from there. Nothing is ever written to disk.
+
 ## Interactive dashboard (live UI panel)
 
 For hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) — Claude Desktop, ChatGPT, Goose, VS Code — say:

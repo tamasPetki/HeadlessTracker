@@ -33,6 +33,8 @@ import { executeGetTransactions } from "../src/mcp/tools/get_transactions.ts";
 import type { Account } from "../src/types.ts";
 import { defaultVault } from "../src/vault.ts";
 import { finalizeAccountSetup } from "../src/setup-finalize.ts";
+import { executeSetupConnector } from "../src/mcp/tools/setup_connector.ts";
+import { parseFlags as parseSetupFlags, buildSetupArgs } from "../src/setup-flags.ts";
 import { DEMO_HOLDINGS, DEMO_PROMPTS, DEMO_TOTAL_USD } from "../src/demo-data.ts";
 
 // Read from package.json (single source of truth) so the CLI banner can't drift
@@ -54,7 +56,7 @@ function printHelp(): void {
 Usage:
   headless-tracker                        Start the MCP stdio server (use this in claude_desktop_config.json)
   headless-tracker demo                   See a sample portfolio in one command (no accounts, no API keys)
-  headless-tracker setup [connector]      Configure credentials for a connector (interactive)
+  headless-tracker setup [connector]      Configure a connector (interactive prompts, or non-interactive via flags)
   headless-tracker list-accounts          Show configured accounts (no secrets shown)
   headless-tracker show holdings [...]    Print current holdings (text table, no Claude required)
   headless-tracker show pnl [...]         Print aggregate P&L
@@ -65,12 +67,19 @@ Usage:
 
 Connectors: bybit, binance, metamask, polymarket, solana
 
-Setup examples:
+Setup examples (interactive — run in a terminal):
   headless-tracker setup bybit
-  headless-tracker setup binance
   headless-tracker setup metamask
-  headless-tracker setup polymarket
   headless-tracker setup solana
+
+Setup examples (non-interactive — for scripts, Docker, CI; secrets via env, never argv):
+  headless-tracker setup solana --address=<base58>
+  headless-tracker setup polymarket --proxy-wallet=0x... --size-threshold=0.01
+  HT_SETUP_ETHERSCAN_KEY=… headless-tracker setup metamask --address=0x... --chains=1,137
+  HT_SETUP_API_KEY=… HT_SETUP_API_SECRET=… headless-tracker setup bybit --account-type=UNIFIED --also=FUND
+  HT_SETUP_API_KEY=… HT_SETUP_API_SECRET=… headless-tracker setup binance --include-futures
+  (On a headless box with no OS keychain, the account is registered and you'll be told the
+   HEADLESS_TRACKER_<CONNECTOR>_<ACCOUNT> env var to set so the data tools can read credentials.)
 
 Show examples:
   headless-tracker show holdings
@@ -490,11 +499,42 @@ async function setupSolana(): Promise<void> {
   console.log("  Test it: ask Claude Desktop \"show my Solana holdings\"\n");
 }
 
-async function setup(connectorId: string | undefined): Promise<void> {
+async function setup(connectorId: string | undefined, flagArgs: string[] = []): Promise<void> {
   if (!connectorId) {
     console.log("Available connectors: bybit, binance, metamask, polymarket, solana");
     console.log("Usage: headless-tracker setup <connector>");
     process.exit(1);
+  }
+
+  const KNOWN = ["bybit", "binance", "metamask", "polymarket", "solana"];
+  if (!KNOWN.includes(connectorId)) {
+    console.error(`Unknown connector: ${connectorId}`);
+    process.exit(1);
+  }
+
+  // Non-interactive when flags are passed, or when stdin isn't a TTY (a pipe,
+  // a script, Docker, CI). In that mode credentials come from flags + env, and
+  // we fail fast with a clear message rather than hang on an unanswerable
+  // readline prompt. Interactive (prompted) setup is the default in a terminal.
+  const flags = parseSetupFlags(flagArgs);
+  const nonInteractive = Object.keys(flags).length > 0 || !process.stdin.isTTY;
+
+  if (nonInteractive) {
+    const built = buildSetupArgs(connectorId, flags, process.env);
+    if (!built.ok) {
+      console.error(`Non-interactive setup: ${built.error}`);
+      console.error("(Run in an interactive terminal for guided prompts, or see 'headless-tracker help'.)");
+      process.exit(1);
+    }
+    console.log("Validating credentials...");
+    const res = await executeSetupConnector(built.args!);
+    if (!res.ok) {
+      console.error(`Validation failed: ${res.error}`);
+      process.exit(1);
+    }
+    console.log(`\n✓ ${res.label} configured. Account ID: ${res.accountId}`);
+    if (res.warning) console.warn(`\n⚠  ${res.warning}`);
+    return;
   }
 
   switch (connectorId) {
@@ -508,9 +548,6 @@ async function setup(connectorId: string | undefined): Promise<void> {
       return setupPolymarket();
     case "solana":
       return setupSolana();
-    default:
-      console.error(`Unknown connector: ${connectorId}`);
-      process.exit(1);
   }
 }
 
@@ -948,7 +985,7 @@ async function main(): Promise<void> {
       console.log(`headless-tracker v${VERSION}`);
       return;
     case "setup":
-      return setup(args[1]);
+      return setup(args[1], args.slice(2));
     case "demo":
       return runDemo();
     case "list-accounts":
