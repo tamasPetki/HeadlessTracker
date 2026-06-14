@@ -2,7 +2,7 @@
   "name": "headless-tracker",
   "version": "1.0.14",
   "mcpName": "io.github.tamasPetki/headless-tracker",
-  "description": "Not financial advice. Portfolio data aggregation MCP server for crypto positions across exchanges, on-chain wallets, and prediction markets.",
+  "description": "Read-only MCP server: let your AI read your whole crypto portfolio across exchanges, on-chain wallets, and prediction markets -- never your API keys, and it can't trade or withdraw. Not financial advice.",
   "type": "module",
   "module": "src/mcp/server.ts",
   "bin": {

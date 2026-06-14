@@ -6,7 +6,7 @@
 
 > ⚠️ **Not financial advice.** HeadlessTracker is a portfolio data aggregation tool. For informational purposes only. See [DISCLAIMER.md](DISCLAIMER.md) for full text.
 
-> MCP server for portfolio tracking across crypto exchanges, on-chain wallets, and prediction markets. Query your portfolio from any MCP-compatible AI host (Claude Desktop, Claude Code, Cursor, ChatGPT).
+> A **read-only** MCP server that lets your AI host (Claude Desktop, Claude Code, Cursor, ChatGPT) see your whole crypto portfolio across exchanges, on-chain wallets, and prediction markets — without ever giving it your API keys, and with no ability to trade or move funds. It reads the numbers; it can't touch the money.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/demo.png" alt="npx headless-tracker demo — a sample five-venue portfolio (Bybit, Binance, MetaMask, Solana, Polymarket) rendered in the terminal with no accounts and no API keys" width="720">

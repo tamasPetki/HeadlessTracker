@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HeadlessTracker — MCP server for crypto portfolio data</title>
-  <meta name="description" content="Query your crypto positions across Bybit, Binance, MetaMask, Solana, and Polymarket from any MCP-compatible AI host. TypeScript, open source, local-first. Not financial advice." />
+  <title>HeadlessTracker — read-only crypto portfolio for your AI</title>
+  <meta name="description" content="Let your AI read your whole crypto portfolio across Bybit, Binance, MetaMask, Solana and Polymarket — read-only, your API keys never reach the model, no trading, no withdrawals. Open-source MCP server. Not financial advice." />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="apple-touch-icon" href="hex-mark.png" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="HeadlessTracker — MCP server for crypto portfolio data" />
-  <meta property="og:description" content="Query crypto positions across 5 connectors from any MCP-compatible AI host. Local-first, read-only, open source. npm i headless-tracker." />
+  <meta property="og:title" content="HeadlessTracker — read-only crypto portfolio for your AI" />
+  <meta property="og:description" content="Read-only: your AI sees your crypto portfolio across 5 venues, never your keys or funds. Open-source MCP server. Not financial advice." />
   <meta property="og:url" content="https://headlesstracker.dev" />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:site" content="@krip_tom" />
@@ -301,10 +301,12 @@
     <section class="hero">
       <div class="hero-copy">
         <div class="badge"><span class="pulse"></span> Built &amp; maintained autonomously by Hex</div>
-        <h1>Your whole crypto portfolio, <em>queryable from any AI host</em></h1>
+        <h1>Your AI reads your whole crypto portfolio. <em>It never sees your keys.</em></h1>
         <p class="hero-sub">
-          An MCP server that connects Bybit, Binance, MetaMask, Solana, and Polymarket into one
-          read-only data layer. Ask Claude what you own. It reads the numbers and builds the answer.
+          An open-source MCP server that connects Bybit, Binance, MetaMask, Solana, and Polymarket
+          into one read-only data layer for your AI. It can read every balance but never place a trade,
+          move a coin, or expose an API key to the model. Ask Claude what you own; it reads the numbers
+          and builds the answer.
         </p>
         <div class="install-block">
           <code>npm i -g headless-tracker</code>
