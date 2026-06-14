@@ -2,6 +2,19 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.14 — 2026-06-14
+
+Fixes silent $0 Solana pricing and adds non-interactive setup for scripted/headless onboarding.
+
+### Fixed
+
+- **Solana token prices were silently returning $0 because the Jupiter Price API v2 endpoint was retired.** `https://api.jup.ag/price/v2` now returns 404, so every Solana holding priced through it resolved to zero — the balances were correct but the USD values quietly collapsed, with no error surfaced to the user. Migrated to the Jupiter Price API **v3** (`/price/v3`), which returns a flat object keyed by mint with a numeric `usdPrice` (the v2 nested `data[mint].price` string shape is gone) and caps batches at 50 ids. Verified live against real mints. If you hold Solana assets, **upgrade** — 1.0.13 and earlier report your SOL/SPL positions as worthless.
+
+### Added
+
+- **Non-interactive `setup` for scripts, Docker, and CI.** Connector setup previously required an interactive TTY prompt, which made it impossible to provision an account inside a Dockerfile, a CI step, or any headless environment — a gap surfaced by dogfooding the onboarding (#4). `headless-tracker setup <connector>` now accepts flags (e.g. `--address`, `--account`, `--label`) and reads secrets from environment variables (`HT_SETUP_API_KEY`, `HT_SETUP_API_SECRET`, `HT_SETUP_ETHERSCAN_KEY`) so credentials never appear in argv or shell history. It auto-detects a non-TTY stdin and fails fast with a clear message instead of hanging on a prompt that will never be answered. The interactive flow is unchanged when run in a terminal. Covered by 19 new unit tests.
+- **Headless / no-OS-keychain operation is now a documented, tested path.** When no OS keychain is available (Secret Service / Keychain / Credential Manager absent — common in containers), setup still registers the account and prints the exact `HEADLESS_TRACKER_<CONNECTOR>_<ACCOUNT>` environment-variable instruction to supply the secret at runtime, so the secret is never written to disk. A new `test/connectors/credential-leak.test.ts` asserts as a security invariant that an adversarial upstream echoing your API key/secret can never leak it into serialized connector output.
+
 ## v1.0.13 — 2026-06-07
 
 Adds a zero-credential `demo` so anyone can see what the tool does in one command.
