@@ -243,6 +243,12 @@ export class PriceService {
   // expects DD-MM-YYYY format. The past doesn't change, so we cache for 7 days
   // (long enough to amortize repeated queries; short enough to bound stale
   // CoinGecko data corrections).
+  //
+  // NOTE (surfaced by the contract canary 2026-06): /coins/{id}/history now
+  // returns 401 without an API key — CoinGecko moved historical data behind the
+  // demo/pro tier (spot /simple/price is still keyless). For keyless users this
+  // path returns an upstream error and time-windowed PnL falls back to its
+  // "missing historical price" handling. Set COINGECKO_API_KEY to restore it.
   async getHistoricalPrice(
     coinId: string,
     date: Date,

@@ -13,6 +13,7 @@
     "setup": "bun run bin/headless-tracker.ts setup",
     "test": "bun test --timeout=15000",
     "test:watch": "bun test --watch --timeout=15000",
+    "contract": "bun run scripts/contract-check.ts",
     "typecheck": "bun --bun tsc --noEmit",
     "build:apps": "bun run scripts/build-mcp-apps.ts",
     "build": "bun run build:apps && bun run scripts/build-node.ts",
