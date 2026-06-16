@@ -244,11 +244,15 @@ export class PriceService {
   // (long enough to amortize repeated queries; short enough to bound stale
   // CoinGecko data corrections).
   //
-  // NOTE (surfaced by the contract canary 2026-06): /coins/{id}/history now
-  // returns 401 without an API key — CoinGecko moved historical data behind the
-  // demo/pro tier (spot /simple/price is still keyless). For keyless users this
-  // path returns an upstream error and time-windowed PnL falls back to its
-  // "missing historical price" handling. Set COINGECKO_API_KEY to restore it.
+  // NOTE (contract canary 2026-06, corrected 2026-06-16): /coins/{id}/history is
+  // still KEYLESS — an earlier canary run saw a 401 and I wrongly read it as a
+  // tier change, but a normal user's first call returns data (verified: BTC on
+  // 2026-06-01 = $73,593, no key). The real behavior is aggressive free-tier
+  // rate-limiting: from a shared/datacenter IP (CI, the canary's runner) you get
+  // 401/429 after a couple of calls. On such a response this call returns an
+  // upstream error and time-windowed PnL degrades to its "missing historical
+  // price" handling; the 7-day cache absorbs most repeat load. Set
+  // COINGECKO_API_KEY only if you query many distinct dates and hit the limit.
   async getHistoricalPrice(
     coinId: string,
     date: Date,

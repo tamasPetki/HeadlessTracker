@@ -22,12 +22,22 @@
 //   - 2xx + shape correct        -> PASS
 //   - 2xx + shape WRONG          -> FAIL  (genuine drift — the signal we want)
 //   - 404 / 410 (endpoint gone)  -> FAIL  (this is what Jupiter v2 became)
+//   - 401 / 403 (keyless 4xx)    -> WARN  (almost always IP/shared-CI throttle on
+//                                          these free endpoints, NOT a tier change;
+//                                          a real user's first call still succeeds.
+//                                          2026-06: a 401 here was once misread as
+//                                          "CoinGecko moved history behind a key" —
+//                                          it hadn't. Stay inconclusive.)
 //   - 429 (rate-limited)         -> WARN  (inconclusive, not drift)
 //   - network error / timeout    -> WARN  (transient; weekly cadence re-checks)
 // Only FAILs exit non-zero. Transient noise stays quiet so the canary is
 // trustworthy when it does fire.
 
 const TIMEOUT_MS = 12_000;
+// Spacing between same-host CoinGecko calls so they don't rate-limit each other
+// (see the CoinGecko block in runChecks). Weekly cadence — the extra ~20s is free.
+const COINGECKO_GAP_MS = 10_000;
+const gap = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
 // Pure validators — exported so test/contract/validators.test.ts can assert
@@ -178,10 +188,19 @@ async function getJson(url: string, init?: RequestInit): Promise<{ status: numbe
 }
 
 // Map an HTTP result + a shape verdict into a canary status with the failure
-// philosophy described at the top of the file.
-function classify(http: { status: number; netErr?: string }, verdict: () => Verdict): { status: Status; detail: string } {
+// philosophy described at the top of the file. Exported so the test can pin the
+// classification (esp. that a keyless 401/403 stays WARN, not FAIL — the 2026-06
+// false-alarm regression).
+export function classify(http: { status: number; netErr?: string }, verdict: () => Verdict): { status: Status; detail: string } {
   if (http.netErr) return { status: "WARN", detail: `network: ${http.netErr}` };
   if (http.status === 429) return { status: "WARN", detail: "rate-limited (429) — inconclusive" };
+  // 401/403 on a keyless public endpoint is almost always IP/shared-CI throttling
+  // (CoinGecko hands these out alongside 429 from busy datacenter IPs), not an
+  // auth/tier change — so it must not read as drift. Verified 2026-06: the history
+  // endpoint still returns data keyless from a normal IP.
+  if (http.status === 401 || http.status === 403) {
+    return { status: "WARN", detail: `HTTP ${http.status} — likely IP/shared-CI throttle on a keyless endpoint, not a contract change; re-check from a clean IP before acting` };
+  }
   if (http.status === 404 || http.status === 410) return { status: "FAIL", detail: `endpoint gone (HTTP ${http.status})` };
   if (http.status < 200 || http.status >= 300) return { status: "WARN", detail: `HTTP ${http.status}` };
   const v = verdict();
@@ -208,18 +227,24 @@ async function runChecks(): Promise<CheckResult[]> {
     const r = await getJson(`https://api.jup.ag/price/v3?ids=${WSOL}`);
     push("jupiter-price-v3", r, () => validateJupiterV3(r.json, WSOL));
   }
-  // 2-4. CoinGecko
+  // 2-4. CoinGecko — the free tier rate-limits hard from one IP (≈2 calls then
+  // 429/401, verified 2026-06), so three back-to-back calls guarantee the later
+  // ones throttle into perpetual WARN. Space them, and run the most drift-prone
+  // check (history — the one that produced the 2026-06 false alarm) FIRST while
+  // the budget is fresh, so it actually gets a 200 to shape-check.
+  {
+    const r = await getJson("https://api.coingecko.com/api/v3/coins/bitcoin/history?date=01-01-2024&localization=false");
+    push("coingecko-history", r, () => validateCoinGeckoHistory(r.json));
+  }
+  await gap(COINGECKO_GAP_MS);
   {
     const r = await getJson("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true");
     push("coingecko-simple-price", r, () => validateCoinGeckoSimplePrice(r.json, "bitcoin"));
   }
+  await gap(COINGECKO_GAP_MS);
   {
     const r = await getJson("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=5&page=1&sparkline=false");
     push("coingecko-markets", r, () => validateCoinGeckoMarkets(r.json));
-  }
-  {
-    const r = await getJson("https://api.coingecko.com/api/v3/coins/bitcoin/history?date=01-01-2024&localization=false");
-    push("coingecko-history", r, () => validateCoinGeckoHistory(r.json));
   }
   // 5-6. Solana RPC
   {

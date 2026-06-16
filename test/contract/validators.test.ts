@@ -23,7 +23,11 @@ import {
   validateFxRates,
   validateBybitEnvelope,
   validateBinanceTicker,
+  classify,
 } from "../../scripts/contract-check.ts";
+
+const okVerdict = () => ({ ok: true, detail: "shape ok" });
+const badVerdict = () => ({ ok: false, detail: "shape WRONG" });
 
 const WSOL = "So11111111111111111111111111111111111111112";
 
@@ -150,5 +154,39 @@ describe("validateBinanceTicker", () => {
   });
   test("rejects a numeric (non-string) price", () => {
     expect(validateBinanceTicker({ symbol: "BTCUSDT", price: 64000.5 }).ok).toBe(false);
+  });
+});
+
+// The failure-philosophy classifier. The headline guard is that a keyless 401/403
+// stays WARN, not FAIL — the regression test for the 2026-06 false alarm, where a
+// shared-CI rate-limit 401 was misread as "CoinGecko moved history behind a key."
+describe("classify (canary failure philosophy)", () => {
+  test("2xx + correct shape -> PASS", () => {
+    expect(classify({ status: 200 }, okVerdict).status).toBe("PASS");
+  });
+  test("2xx + WRONG shape -> FAIL (the genuine-drift signal)", () => {
+    const c = classify({ status: 200 }, badVerdict);
+    expect(c.status).toBe("FAIL");
+    expect(c.detail).toContain("WRONG");
+  });
+  test("404 / 410 (endpoint gone) -> FAIL", () => {
+    expect(classify({ status: 404 }, okVerdict).status).toBe("FAIL");
+    expect(classify({ status: 410 }, okVerdict).status).toBe("FAIL");
+  });
+  test("401 / 403 on a keyless endpoint -> WARN, never FAIL (false-alarm regression)", () => {
+    for (const status of [401, 403]) {
+      const c = classify({ status }, badVerdict); // even with a bad verdict, the 4xx short-circuits
+      expect(c.status).toBe("WARN");
+      expect(c.detail).toContain("throttle");
+    }
+  });
+  test("429 (rate-limited) -> WARN", () => {
+    expect(classify({ status: 429 }, okVerdict).status).toBe("WARN");
+  });
+  test("network error -> WARN", () => {
+    expect(classify({ status: 0, netErr: "ECONNRESET" }, okVerdict).status).toBe("WARN");
+  });
+  test("other non-2xx (e.g. 500) -> WARN", () => {
+    expect(classify({ status: 500 }, okVerdict).status).toBe("WARN");
   });
 });
