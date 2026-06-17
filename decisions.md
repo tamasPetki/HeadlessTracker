@@ -6,6 +6,18 @@ This file is the **public record** of architectural and product decisions. It's 
 
 ---
 
+## 2026-06-17 — Hyperliquid perp account: report equity as net worth, positions as informational
+
+**What**: The Hyperliquid connector reports a perp account's **equity** (`marginSummary.accountValue` = collateral + unrealized PnL) as a single cash-class holding — that is the number that enters the portfolio total. Each open perp position is also emitted as its own holding (signed size, with notional / unrealized PnL / entry / liquidation / leverage in metadata), but with its **value field intentionally left undefined** so it is not summed into net worth.
+
+**Why**: A leveraged position's *notional* is not what it's worth to you. A 20x BTC position can carry ~$160k of notional against ~$8k of margin; adding `positionValue` to the portfolio total would overstate net worth by an order of magnitude, and for a short the notional isn't even the right sign. `accountValue` already nets collateral and unrealized PnL into the one honest "what is this account worth" figure a tracker should report. Emitting positions as value-less holdings keeps full exposure detail available to the LLM ("am I long or short, how much, what's my unrealized PnL?") without double-counting. This reuses the existing "honest-unknown value" convention (the Solana connector already emits holdings with undefined value), so downstream tools handle it without special-casing.
+
+**Alternatives considered**: (a) Sum position notionals into the total — rejected, wildly overstates a leveraged account. (b) Fold everything into the single equity number and drop positions — rejected, loses the exposure detail that makes the connector useful for risk questions. (c) Put positions only in metadata of the equity holding — rejected, less discoverable to a host iterating holdings.
+
+**Reversal trigger**: If users report the value-less positions are confusing in holdings views, switch to surfacing them through a dedicated tool (like `get_polymarket_positions`) rather than as holdings, and keep only the equity holding in the main list.
+
+---
+
 ## 2026-06-06 — Dependency-free Sentry envelope client over `@sentry/node`
 
 **What**: Error reporting is opt-in via `SENTRY_DSN` and implemented in-house in `src/observability/sentry.ts`, posting a Sentry *envelope* over Node's built-in `fetch`. We do not depend on `@sentry/node`. `captureException` is wired at the connector error boundaries in the orchestrator; `captureMessage` reports upstream schema mismatches. With no `SENTRY_DSN` set (the default for all end users) every capture is a no-op.

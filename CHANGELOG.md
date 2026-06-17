@@ -2,6 +2,18 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.16 — 2026-06-17
+
+Adds **Hyperliquid** as the sixth connector — read-only, address-only, no API key or signature. The most common reason people couldn't use HeadlessTracker was that it didn't track the venue where their coins actually live; Hyperliquid is one of the loudest of those gaps.
+
+### Added
+
+- **Hyperliquid connector** (`src/connectors/hyperliquid.ts`). Tracks, from just the EVM address you trade from:
+  - **Perp account equity** — reported as the account's net USD value (`marginSummary.accountValue` = collateral + unrealized PnL), as a single cash holding.
+  - **Open perp positions** — one holding each, signed size (negative = short), with notional, unrealized PnL, entry/liquidation price and leverage in metadata. Their notional is deliberately **not** summed into net worth (a leveraged position's notional ≠ what it's worth to you) — the equity above already accounts for it.
+  - **Spot balances** — priced via `spotMetaAndAssetCtxs` USDC pairs (USDC = $1; unpriceable tokens dust-filtered). Multi-address per account. Recent fills (`userFills`) as transactions.
+  - Wired through setup (`setup_connector` MCP tool + CLI `setup hyperliquid --address=0x...` + Settings UI form), `list_accounts`/`refresh_data` scoping, and the `demo` dataset (now a six-venue sample portfolio).
+
 ## v1.0.15 — 2026-06-17
 
 Sharpens MCP tool descriptions so AI hosts route portfolio queries more reliably. No behavior change — descriptions only.

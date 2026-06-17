@@ -11,12 +11,12 @@ import type { ConnectorId } from "../../types.ts";
 export const REFRESH_DATA_TOOL_NAME = "refresh_data";
 
 export const REFRESH_DATA_DESCRIPTION = [
-  "Invalidates the PORTFOLIO TRACKER cache (Bybit/Binance/MetaMask/Polymarket/Solana holdings + transactions) and forces a fresh fetch from upstream APIs on the next call.",
+  "Invalidates the PORTFOLIO TRACKER cache (Bybit/Binance/MetaMask/Polymarket/Solana/Hyperliquid holdings + transactions) and forces a fresh fetch from upstream APIs on the next call.",
   "Use this when the user asks: 'refresh my portfolio', 'update my holdings', 'get the latest portfolio prices',",
   "'fetch fresh portfolio data', 'check current crypto prices', 'my balances look stale', 'force an update',",
   "'my data is outdated', or implies real-time freshness is required FOR THE TRACKER.",
   "",
-  "Optionally scope to a single connector (bybit, binance, metamask, polymarket, solana).",
+  "Optionally scope to a single connector (bybit, binance, metamask, polymarket, solana, hyperliquid).",
   "Without a scope, invalidates everything tracker-related.",
   "",
   "DO NOT call this tool when the user means: refreshing a webpage, refreshing an OAuth token, refreshing browser cache, refreshing data from a non-tracker MCP server. It only invalidates the headless-tracker SQLite cache.",
@@ -30,7 +30,7 @@ export const REFRESH_DATA_DESCRIPTION = [
 // machine-readable parameter semantics, not just the prose blob above.
 export const REFRESH_DATA_INPUT_SCHEMA = {
   connector: z
-    .enum(["bybit", "binance", "metamask", "polymarket", "solana"])
+    .enum(["bybit", "binance", "metamask", "polymarket", "solana", "hyperliquid"])
     .optional()
     .describe(
       "Scope the cache invalidation to one connector. Omit to invalidate every tracker connector's cached holdings and transactions."

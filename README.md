@@ -9,19 +9,19 @@
 > A **read-only** MCP server that lets your AI host (Claude Desktop, Claude Code, Cursor, ChatGPT) see your whole crypto portfolio across exchanges, on-chain wallets, and prediction markets — without ever giving it your API keys, and with no ability to trade or move funds. It reads the numbers; it can't touch the money.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/demo.png" alt="npx headless-tracker demo — a sample five-venue portfolio (Bybit, Binance, MetaMask, Solana, Polymarket) rendered in the terminal with no accounts and no API keys" width="720">
+  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/demo.png" alt="npx headless-tracker demo — a sample six-venue portfolio (Bybit, Binance, MetaMask, Solana, Hyperliquid, Polymarket) rendered in the terminal with no accounts and no API keys" width="720">
 </p>
 
 <p align="center"><sub>↑ Real output of <code>npx headless-tracker demo</code> — five venues, no accounts, no API keys. Then ask your AI host about it.</sub></p>
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** Production-ready and live on npm (version badge above). Five connectors (Bybit, Binance, MetaMask/EVM, Solana, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 377-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
+**Status:** Production-ready and live on npm (version badge above). Six connectors (Bybit, Binance, MetaMask/EVM, Solana, Hyperliquid, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 426-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
 
 <details>
 <summary><b>Full feature list</b></summary>
 
-- **5 connectors:** Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Polymarket, Solana multi-wallet
+- **6 connectors:** Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Solana multi-wallet, Hyperliquid (perp + spot, address-only), Polymarket
 - **15 MCP tools:** 6 data + 7 account/token management + 2 MCP App panels
 - **3 MCP prompts:** `portfolio-dashboard`, `weekly-review`, `risk-check`
 - **Interactive dashboard MCP App:** 3 tabs (Portfolio / Weekly / Risk) with donut + bar charts, currency switcher, refresh button
@@ -31,7 +31,7 @@ The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate das
 - **Multi-currency display** (USD/EUR/GBP/HUF); CoinGecko + Jupiter spot and historical prices
 - **Time-windowed PnL** (`--timeframe=24h|7d|30d|ytd`)
 - **377-test suite**; runs under plain Node or Bun
-- **Read-only & local-first:** no orders/withdrawals/transfers; 3 of 5 connectors need only a public address; secrets live in your OS keychain and never enter the model's context — see [SECURITY.md](SECURITY.md)
+- **Read-only & local-first:** no orders/withdrawals/transfers; 4 of 6 connectors need only a public address; secrets live in your OS keychain and never enter the model's context — see [SECURITY.md](SECURITY.md)
 
 See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
 </details>
@@ -74,7 +74,7 @@ Allocation by asset class:
 
 It also prints the plain-English questions you'd ask Claude ("what do I own across everything?", "how is it split?") mapped to the MCP tool that answers each. When you want **your own** numbers, it's the same loop with a real address or read-only key:
 
-You shouldn't have to hand a new tool your exchange keys just to find out whether it's any good. Solana and Polymarket read **public on-chain addresses**, so you can point HeadlessTracker at any wallet you can see (your own included) with zero credentials.
+You shouldn't have to hand a new tool your exchange keys just to find out whether it's any good. Solana, Hyperliquid, and Polymarket read **public on-chain addresses**, so you can point HeadlessTracker at any wallet you can see (your own included) with zero credentials. (Hyperliquid is fully keyless — perp positions, account equity, and spot balances all read from just the address you trade from.)
 
 ```bash
 # install (or prefix any command with `npx`)
@@ -110,6 +110,7 @@ That is the whole loop: install, point at a public address, see normalized holdi
 ```bash
 # public-address connectors: everything via flags, zero secrets
 headless-tracker setup solana --address=<base58> --dust=0.5
+headless-tracker setup hyperliquid --address=0x...   # perp + spot, no key
 headless-tracker setup polymarket --proxy-wallet=0x... 
 
 # connectors with a secret: non-secret config via flags, secret via env
@@ -148,7 +149,7 @@ For setup that doesn't drop you into a terminal, ask:
 The Settings MCP App opens with four tabs:
 
 - **Accounts** — list of configured accounts with a Remove button (one-way confirm dialog; deletes from both the OS keychain and the registry).
-- **Add Account** — forms for Bybit / Binance / MetaMask / Solana / Polymarket. Each form validates against the upstream API before persisting credentials. Explicit security disclosure at the top: credentials submitted via the form transit Claude Desktop's process en route to the keychain. **All five connectors use READ-ONLY credentials by design** (Bybit "Read" only, no Withdraw; Binance "Enable Reading" only, no Trade or Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public; Solana addresses are public on-chain identifiers). Worst-case leak = portfolio-read, never fund movement. For zero-trust, the CLI flow (`bun run setup <connector>`) stays available.
+- **Add Account** — forms for Bybit / Binance / MetaMask / Solana / Hyperliquid / Polymarket. Each form validates against the upstream API before persisting credentials. Explicit security disclosure at the top: credentials submitted via the form transit Claude Desktop's process en route to the keychain. **All six connectors use READ-ONLY credentials by design** (Bybit "Read" only, no Withdraw; Binance "Enable Reading" only, no Trade or Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public; Solana and Hyperliquid addresses are public on-chain identifiers — Hyperliquid needs no key or signature at all). Worst-case leak = portfolio-read, never fund movement. For zero-trust, the CLI flow (`bun run setup <connector>`) stays available.
 - **Wallets** — add an additional wallet address to an existing MetaMask OR Solana account (multi-wallet under one MCP account, sharing the same Etherscan key/chain selection or RPC URL).
 - **Custom Tokens** — list / add / remove ERC-20 tokens per chain. Token data is public on-chain; no keychain involvement.
 
@@ -203,6 +204,7 @@ Set that variable to the connector's credential JSON in your MCP server's `env` 
 | Binance | `HEADLESS_TRACKER_BINANCE_KEY_<FIRST6>` | `{"apiKey":"...","apiSecret":"...","includeFutures":false}` |
 | MetaMask | `HEADLESS_TRACKER_METAMASK_0X<ADDR>` | `{"address":"0x...","etherscanApiKey":"...","chainIds":[1],"trackCommonTokens":true,"hasEtherscanPro":false}` |
 | Solana | `HEADLESS_TRACKER_SOLANA_<ADDR>` | `{"address":"<base58>"}` (optional `"rpcUrl"`, `"dustThresholdUsd"`) |
+| Hyperliquid | `HEADLESS_TRACKER_HYPERLIQUID_0X<ADDR>` | `{"address":"0x..."}` (optional `"dustThresholdUsd"`) |
 | Polymarket | `HEADLESS_TRACKER_POLYMARKET_0X<ADDR>` | `{"proxyWallet":"0x...","sizeThreshold":0.01}` |
 
 The variable name is derived from the account identifier (`setup` prints the exact string, so you don't have to construct it by hand). Example for a Claude Desktop / MCP config `env` block:
@@ -358,8 +360,9 @@ Custom tokens are stored per-account in the SQLite account store (NOT the keycha
 | MetaMask / EVM wallets | Etherscan V2 API key | ✓ Full | Single key covers Ethereum, Polygon, BSC, Base, Arbitrum, Optimism. Native + bundled common ERC-20 tokens (USDC, USDT, WETH, WBTC, LINK, DAI) for balances; native + ERC-20 transfers for transactions. Custom token lists via `headless-tracker token add ...`. Multi-wallet per account (one Etherscan key, multiple addresses). BSC/Base require Etherscan Pro on the free tier (auto-skipped with a warning otherwise). |
 | Polymarket | Proxy wallet address (no API key) | ✓ Full | Uses public data-api. Positions + BUY/SELL trade history (up to ~1000 most recent) via `/trades?user=PROXY`. Settled-loss positions (resolved markets worth $0 that the data-api still returns) are filtered out by a value-based dust threshold (`dustThresholdUsd`, default $0.01). |
 | Solana wallets | Base58 address (no API key) | ✓ Holdings | Public Solana RPC + Jupiter Price API v2. Native SOL + SPL tokens (Token program v1; Token-2022 deferred). Multi-wallet per account, optional premium RPC URL (Helius/QuickNode/Triton) for users tracking 3+ wallets. Pinned metadata for major mints (USDC/USDT/mSOL/JUP/JTO/PYTH/BONK/RNDR/WIF/JLP). Tx history is `ok([])` for v0.12 — coming in v0.14 with premium-RPC opt-in. |
+| Hyperliquid | EVM address (no API key, no signature) | ✓ Full | Public `info` endpoint. Perp account **equity** reported as the account's net USD value (collateral + unrealized PnL); open perp positions surface as separate Holdings with signed size, notional, unrealized PnL, entry/liquidation price and leverage in metadata — their notional is deliberately **not** summed into net worth (would overstate a leveraged account). Spot balances priced via `spotMetaAndAssetCtxs` USDC pairs; USDC = $1, unpriceable tokens dust-filtered. Tx history via recent fills (`userFills`, up to 2000). Multi-address per account. |
 
-To add a new connector, implement `Connector` from `src/connectors/types.ts` and add it to `CONNECTOR_FACTORIES` in `src/mcp/orchestrator.ts`. ~150-400 lines of code per connector based on the existing five (depends on whether the upstream API is REST/SDK/RPC and how rich the response shape is).
+To add a new connector, implement `Connector` from `src/connectors/types.ts` and add it to `CONNECTOR_FACTORIES` in `src/mcp/orchestrator.ts`. ~150-400 lines of code per connector based on the existing six (depends on whether the upstream API is REST/SDK/RPC and how rich the response shape is).
 
 ## MCP tools exposed
 

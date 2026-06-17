@@ -27,11 +27,12 @@ So the blast radius of a leaked credential is bounded to *reading* balances. It 
 |-----------|---------------------|
 | MetaMask / EVM | a **public address** — no secret |
 | Solana | a **public address** — no secret |
+| Hyperliquid | a **public address** — no secret, no signature |
 | Polymarket | a **public wallet address** — no secret |
 | Bybit | a **read-only** API key + secret |
 | Binance | a **read-only** API key + secret |
 
-Three of the five connectors are pure public-chain reads: you hand over an address that is already public on-chain, and there is nothing secret to leak. Only the two centralized exchanges take an API key, and those should be **read-only scoped** (every supported venue offers that scope). See the `ConnectorCredentials` contract in [`src/connectors/types.ts`](src/connectors/types.ts).
+Four of the six connectors are pure public-chain reads: you hand over an address that is already public on-chain, and there is nothing secret to leak. Only the two centralized exchanges take an API key, and those should be **read-only scoped** (every supported venue offers that scope). See the `ConnectorCredentials` contract in [`src/connectors/types.ts`](src/connectors/types.ts).
 
 ## Local-first custody — the secret never leaves your machine
 

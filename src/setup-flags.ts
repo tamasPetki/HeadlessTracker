@@ -70,6 +70,18 @@ export function buildSetupArgs(connector: string, flags: Flags, env: Env): Build
       return { ok: true, args: { connector: "solana", solana } };
     }
 
+    case "hyperliquid": {
+      const address = flags.address;
+      if (!address) return { ok: false, error: "hyperliquid requires --address=<0x address you trade from>" };
+      const hyperliquid: NonNullable<SetupConnectorArgs["hyperliquid"]> = { address };
+      if (flags.dust !== undefined) {
+        const d = Number(flags.dust);
+        if (Number.isNaN(d) || d < 0) return { ok: false, error: `invalid --dust value: ${flags.dust}` };
+        hyperliquid.dustThresholdUsd = d;
+      }
+      return { ok: true, args: { connector: "hyperliquid", hyperliquid } };
+    }
+
     case "polymarket": {
       const proxyWallet = flags["proxy-wallet"];
       if (!proxyWallet) return { ok: false, error: "polymarket requires --proxy-wallet=<0x address>" };

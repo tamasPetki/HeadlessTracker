@@ -9,6 +9,7 @@ import { defaultAccountStore, type AccountStore } from "../accounts.ts";
 import { Cache, defaultCache } from "../cache.ts";
 import { BinanceConnector } from "../connectors/binance.ts";
 import { BybitConnector } from "../connectors/bybit.ts";
+import { HyperliquidConnector } from "../connectors/hyperliquid.ts";
 import { MetaMaskConnector } from "../connectors/metamask.ts";
 import { PolymarketConnector } from "../connectors/polymarket.ts";
 import { SolanaConnector } from "../connectors/solana.ts";
@@ -24,6 +25,7 @@ const CONNECTOR_FACTORIES: Record<ConnectorId, () => Connector> = {
   metamask: () => new MetaMaskConnector(),
   polymarket: () => new PolymarketConnector(),
   solana: () => new SolanaConnector(),
+  hyperliquid: () => new HyperliquidConnector(),
 };
 
 // A connector operation must finish within this deadline. Every connector

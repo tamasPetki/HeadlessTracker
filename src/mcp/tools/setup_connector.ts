@@ -24,6 +24,7 @@ import { z } from "zod";
 import { defaultAccountStore, type AccountStore } from "../../accounts.ts";
 import { BinanceConnector } from "../../connectors/binance.ts";
 import { BybitConnector } from "../../connectors/bybit.ts";
+import { HyperliquidConnector } from "../../connectors/hyperliquid.ts";
 import { MetaMaskConnector } from "../../connectors/metamask.ts";
 import { SUPPORTED_CHAINS, type SupportedChainId } from "../../connectors/metamask-chains.ts";
 import { PolymarketConnector } from "../../connectors/polymarket.ts";
@@ -36,7 +37,7 @@ export const SETUP_CONNECTOR_TOOL_NAME = "setup_connector";
 
 export const SETUP_CONNECTOR_DESCRIPTION = [
   "Creates a new account by writing READ-ONLY credentials to the OS keychain.",
-  "Use when the user asks: 'add a Bybit account', 'connect Binance', 'connect my MetaMask wallet', 'set up Polymarket', 'connect my Solana wallet', 'add new exchange'.",
+  "Use when the user asks: 'add a Bybit account', 'connect Binance', 'connect my MetaMask wallet', 'set up Polymarket', 'connect my Solana wallet', 'track my Hyperliquid', 'add my Hyperliquid wallet', 'add new exchange'.",
   "",
   "BEHAVIOR CONTRACT FOR YOU (the LLM):",
   "- After this tool succeeds, confirm ONLY the account label and account_id back to the user.",
@@ -46,15 +47,16 @@ export const SETUP_CONNECTOR_DESCRIPTION = [
   "Credentials are validated against the upstream API before they're persisted; if validation fails, nothing is written.",
   "Storage: OS keychain (macOS Keychain / Linux Secret Service / Windows Credential Vault) via @napi-rs/keyring. Same path as the CLI setup flow.",
   "",
-  "All five connectors use READ-ONLY credentials by design (Bybit 'Read' only, Binance 'Enable Reading' only, Etherscan is a public-data rate-limit token, Polymarket proxy wallet is already public, Solana addresses are public on-chain identifiers).",
+  "All six connectors use READ-ONLY credentials by design (Bybit 'Read' only, Binance 'Enable Reading' only, Etherscan is a public-data rate-limit token, Polymarket proxy wallet is already public, Solana/Hyperliquid addresses are public on-chain identifiers — Hyperliquid needs no key or signature at all).",
   "",
-  "Inputs (one of bybit / binance / metamask / polymarket / solana required):",
-  "  - connector: 'bybit' | 'binance' | 'metamask' | 'polymarket' | 'solana'",
+  "Inputs (one of bybit / binance / metamask / polymarket / solana / hyperliquid required):",
+  "  - connector: 'bybit' | 'binance' | 'metamask' | 'polymarket' | 'solana' | 'hyperliquid'",
   "  - bybit: { apiKey, apiSecret, accountType: 'UNIFIED'|'CONTRACT'|'SPOT'|'FUND' (primary, also the account ID), accountTypes?: array of additional types to fan out across (e.g. ['FUND'] alongside UNIFIED so funding-wallet balances are tracked too) }",
   "  - binance: { apiKey, apiSecret, includeFutures (optional bool, default false), recvWindow (optional ms) }",
   "  - metamask: { address, etherscanApiKey, chainIds (number[]), trackCommonTokens (bool), hasEtherscanPro (bool) }",
   "  - polymarket: { proxyWallet (0x...), sizeThreshold (default 0.01) }",
   "  - solana: { address (base58), rpcUrl (optional premium RPC), dustThresholdUsd (optional, default 0.5) }",
+  "  - hyperliquid: { address (0x... EVM address you trade from), dustThresholdUsd (optional, default 0.5). No API key — public address only. Tracks perp account equity + open positions + spot balances. }",
 ].join(" ");
 
 const BYBIT_CREDS = z.object({
@@ -101,9 +103,14 @@ const SOLANA_CREDS = z.object({
   dustThresholdUsd: z.number().nonnegative().optional().describe("Hide token positions worth less than this USD value (default 0.5)."),
 });
 
+const HYPERLIQUID_CREDS = z.object({
+  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/).describe("Public EVM address you trade from on Hyperliquid (0x + 40 hex). Not a secret — no API key or signature needed."),
+  dustThresholdUsd: z.number().nonnegative().optional().describe("Hide spot token positions worth less than this USD value (default 0.5). Perp account equity always shows."),
+});
+
 export const SETUP_CONNECTOR_INPUT_SCHEMA = {
   connector: z
-    .enum(["bybit", "binance", "metamask", "polymarket", "solana"])
+    .enum(["bybit", "binance", "metamask", "polymarket", "solana", "hyperliquid"])
     .describe(
       "Which connector to set up. Provide the matching credential object below (e.g. connector='bybit' requires the 'bybit' object). All credentials are READ-ONLY by design."
     ),
@@ -122,15 +129,19 @@ export const SETUP_CONNECTOR_INPUT_SCHEMA = {
   solana: SOLANA_CREDS.optional().describe(
       "Solana config (required when connector='solana'). Public base58 address; no secret."
     ),
+  hyperliquid: HYPERLIQUID_CREDS.optional().describe(
+      "Hyperliquid config (required when connector='hyperliquid'). Public EVM address; no key or signature."
+    ),
 };
 
 export interface SetupConnectorArgs {
-  connector: "bybit" | "binance" | "metamask" | "polymarket" | "solana";
+  connector: "bybit" | "binance" | "metamask" | "polymarket" | "solana" | "hyperliquid";
   bybit?: z.infer<typeof BYBIT_CREDS>;
   binance?: z.infer<typeof BINANCE_CREDS>;
   metamask?: z.infer<typeof METAMASK_CREDS>;
   polymarket?: z.infer<typeof POLYMARKET_CREDS>;
   solana?: z.infer<typeof SOLANA_CREDS>;
+  hyperliquid?: z.infer<typeof HYPERLIQUID_CREDS>;
 }
 
 export interface SetupConnectorResult {
@@ -173,6 +184,10 @@ export async function executeSetupConnector(
   if (args.connector === "solana") {
     if (!args.solana) return { ok: false, error: "solana credentials required" };
     return setupSolana(args.solana, vault, store);
+  }
+  if (args.connector === "hyperliquid") {
+    if (!args.hyperliquid) return { ok: false, error: "hyperliquid credentials required" };
+    return setupHyperliquid(args.hyperliquid, vault, store);
   }
   return { ok: false, error: `unknown connector: ${args.connector}` };
 }
@@ -329,6 +344,33 @@ async function setupSolana(
     },
   };
   const fin = await finalizeAccountSetup(vault, store, "solana", accountIdentifier, fullCreds, account);
+  return { ok: fin.ok, accountId, label, warning: fin.warning };
+}
+
+async function setupHyperliquid(
+  creds: z.infer<typeof HYPERLIQUID_CREDS>,
+  vault: Vault,
+  store: AccountStore
+): Promise<SetupConnectorResult> {
+  const fullCreds: Record<string, unknown> = { address: creds.address };
+  if (typeof creds.dustThresholdUsd === "number") fullCreds.dustThresholdUsd = creds.dustThresholdUsd;
+  const conn = new HyperliquidConnector();
+  const validation = await conn.validateCredentials(fullCreds);
+  if (!validation.ok) return { ok: false, error: `Hyperliquid validation failed: ${validation.error.message}` };
+
+  // EVM address — lowercase for a stable account id (same convention as MetaMask).
+  const accountIdentifier = creds.address.toLowerCase();
+  const accountId = `hyperliquid:${accountIdentifier}`;
+  const labelShort = `${creds.address.slice(0, 6)}...${creds.address.slice(-4)}`;
+  const label = `Hyperliquid ${labelShort}`;
+  const account: Account = {
+    id: accountId,
+    connectorId: "hyperliquid",
+    label,
+    createdAt: Date.now(),
+    metadata: { address: creds.address, dustThresholdUsd: creds.dustThresholdUsd },
+  };
+  const fin = await finalizeAccountSetup(vault, store, "hyperliquid", accountIdentifier, fullCreds, account);
   return { ok: fin.ok, accountId, label, warning: fin.warning };
 }
 

@@ -1,6 +1,6 @@
 # Installing HeadlessTracker (guide for AI agents)
 
-HeadlessTracker is a **read-only** MCP server that gives an AI host a unified view of a crypto portfolio across five venues (Bybit, Binance, MetaMask/EVM, Solana, Polymarket). It aggregates balances and positions only — it is **not financial advice**, and it **never moves funds**. Every connector uses read-only credentials by design, and **API keys never enter the model's context**: connectors sign upstream requests below the MCP boundary, and tools return only normalized `{symbol, quantity, value}` holdings.
+HeadlessTracker is a **read-only** MCP server that gives an AI host a unified view of a crypto portfolio across six venues (Bybit, Binance, MetaMask/EVM, Solana, Hyperliquid, Polymarket). It aggregates balances and positions only — it is **not financial advice**, and it **never moves funds**. Every connector uses read-only credentials by design, and **API keys never enter the model's context**: connectors sign upstream requests below the MCP boundary, and tools return only normalized `{symbol, quantity, value}` holdings.
 
 Node 20+ is the only requirement. No clone, no build step, no Bun.
 
@@ -23,13 +23,13 @@ Add this to the host's MCP servers config (e.g. `claude_desktop_config.json`, or
 
 ## 2. Verify it works with zero credentials
 
-Before connecting any account, confirm the server runs end-to-end with the built-in demo — a sample five-venue portfolio with no accounts, no keys, not even an address:
+Before connecting any account, confirm the server runs end-to-end with the built-in demo — a sample six-venue portfolio with no accounts, no keys, not even an address:
 
 ```bash
 npx -y headless-tracker demo
 ```
 
-A rendered five-venue sample portfolio means the install is good. Over MCP, the server answers `initialize` + `tools/list` with **15 tools** (`get_holdings`, `get_allocations`, `get_pnl`, `list_accounts`, `setup_connector`, `render_dashboard`, …).
+A rendered six-venue sample portfolio means the install is good. Over MCP, the server answers `initialize` + `tools/list` with **15 tools** (`get_holdings`, `get_allocations`, `get_pnl`, `list_accounts`, `setup_connector`, `render_dashboard`, …).
 
 ## 3. (Optional) Connect real, read-only accounts
 
@@ -38,6 +38,7 @@ Each connector is set up once. Credentials are stored in the OS keychain (macOS 
 ```bash
 # Public address only — no key needed:
 npx -y headless-tracker setup solana --address=<base58>
+npx -y headless-tracker setup hyperliquid --address=0x...
 npx -y headless-tracker setup polymarket --proxy-wallet=0x...
 
 # Read-only public-data token:

@@ -2,7 +2,7 @@
 // Account model (eng review 1D): Connector → Account (N) → Holding/Transaction (N).
 // Account.id is namespaced: "{connectorId}:{accountIdentifier}", e.g. "bybit:UNIFIED" or "metamask:0xabc...".
 
-export type ConnectorId = "bybit" | "metamask" | "polymarket" | "solana" | "binance";
+export type ConnectorId = "bybit" | "metamask" | "polymarket" | "solana" | "binance" | "hyperliquid";
 
 export type AssetClass = "crypto" | "stock" | "prediction" | "cash";
 

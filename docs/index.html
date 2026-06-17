@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HeadlessTracker — read-only crypto portfolio for your AI</title>
-  <meta name="description" content="Let your AI read your whole crypto portfolio across Bybit, Binance, MetaMask, Solana and Polymarket — read-only, your API keys never reach the model, no trading, no withdrawals. Open-source MCP server. Not financial advice." />
+  <meta name="description" content="Let your AI read your whole crypto portfolio across Bybit, Binance, MetaMask, Solana, Hyperliquid and Polymarket — read-only, your API keys never reach the model, no trading, no withdrawals. Open-source MCP server. Not financial advice." />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="apple-touch-icon" href="hex-mark.png" />
   <meta property="og:type" content="website" />
@@ -303,7 +303,7 @@
         <div class="badge"><span class="pulse"></span> Built &amp; maintained autonomously by Hex</div>
         <h1>Your AI reads your whole crypto portfolio. <em>It never sees your keys.</em></h1>
         <p class="hero-sub">
-          An open-source MCP server that connects Bybit, Binance, MetaMask, Solana, and Polymarket
+          An open-source MCP server that connects Bybit, Binance, MetaMask, Solana, Hyperliquid, and Polymarket
           into one read-only data layer for your AI. It can read every balance but never place a trade,
           move a coin, or expose an API key to the model. Ask Claude what you own; it reads the numbers
           and builds the answer.
@@ -312,7 +312,7 @@
           <code>npm i -g headless-tracker</code>
           <button class="copy-btn" onclick="navigator.clipboard.writeText('npm i -g headless-tracker').then(()=>{this.textContent='Copied';setTimeout(()=>{this.textContent='Copy'},1500)})">Copy</button>
         </div>
-        <p class="hero-keys" style="font-size:13.5px;color:var(--muted);margin:12px 0 0;line-height:1.55;">No API keys needed to try it. Point it at any public Solana or Polymarket wallet and see real holdings before you connect anything private.</p>
+        <p class="hero-keys" style="font-size:13.5px;color:var(--muted);margin:12px 0 0;line-height:1.55;">No API keys needed to try it. Point it at any public Solana, Hyperliquid, or Polymarket wallet and see real holdings before you connect anything private.</p>
         <div class="hero-cta">
           <a class="btn-primary" href="#quickstart">Quick start</a>
           <a class="btn-ghost" href="https://github.com/tamasPetki/HeadlessTracker">View on GitHub</a>
@@ -469,7 +469,7 @@
   <div class="container">
     <div class="section-head">
       <div class="eyebrow">Connectors</div>
-      <h2>Five data sources, one schema.</h2>
+      <h2>Six data sources, one schema.</h2>
       <p class="lead">Every connector uses read-only credentials by design. Worst case if a key leaks is a portfolio read, never a fund movement.</p>
     </div>
     <div class="connectors">
@@ -488,6 +488,10 @@
       <div class="connector">
         <div class="connector-top"><span class="connector-name">Solana</span><span class="tag pub">public address</span></div>
         <div class="connector-detail">Native SOL + SPL tokens via public RPC and Jupiter price. Multi-wallet, no API key.</div>
+      </div>
+      <div class="connector">
+        <div class="connector-top"><span class="connector-name">Hyperliquid</span><span class="tag pub">public address</span></div>
+        <div class="connector-detail">Perp account equity + open positions (size, PnL, leverage) and spot balances. Keyless — just the address you trade from.</div>
       </div>
       <div class="connector">
         <div class="connector-top"><span class="connector-name">Polymarket</span><span class="tag pub">public address</span></div>
@@ -546,9 +550,9 @@ headless-tracker show holdings</code></pre>
         <button class="copy-btn" onclick="navigator.clipboard.writeText('npx headless-tracker demo').then(()=>{this.textContent='Copied';setTimeout(()=>{this.textContent='Copy'},1500)})">Copy</button>
       </div>
       <a href="https://github.com/tamasPetki/HeadlessTracker#readme" aria-label="View HeadlessTracker on GitHub">
-        <img src="demo.png" alt="npx headless-tracker demo: a sample five-venue portfolio (Bybit, Binance, MetaMask, Solana, Polymarket) rendered in the terminal with no accounts and no API keys" loading="lazy" style="width:100%;max-width:660px;border-radius:14px;display:block;margin:18px auto 0;">
+        <img src="demo.png" alt="npx headless-tracker demo: a sample six-venue portfolio (Bybit, Binance, MetaMask, Solana, Hyperliquid, Polymarket) rendered in the terminal with no accounts and no API keys" loading="lazy" style="width:100%;max-width:660px;border-radius:14px;display:block;margin:18px auto 0;">
       </a>
-      <p class="step-note" style="margin-top:14px;">Zero credentials, not even an address &mdash; a full five-venue sample through the same renderer the real tool uses. The fastest way to see what your AI host reads.</p>
+      <p class="step-note" style="margin-top:14px;">Zero credentials, not even an address &mdash; a full six-venue sample through the same renderer the real tool uses. The fastest way to see what your AI host reads.</p>
     </div>
     <pre><code><span class="hl-comment"># 1. Install (or skip this and use npx in the config below)</span>
 npm i -g headless-tracker

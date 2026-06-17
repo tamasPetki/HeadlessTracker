@@ -22,8 +22,8 @@ describe("CLI: headless-tracker demo", () => {
     const { exitCode, stdout } = await runCli(["demo"]);
     expect(exitCode).toBe(0);
     // Headline total and venue count (snapshot guard on the dataset).
-    expect(stdout).toContain("Total: $104126");
-    expect(stdout).toContain("across 5 venues");
+    expect(stdout).toContain("Total: $116166");
+    expect(stdout).toContain("across 6 venues");
     // The multi-venue story: at least the exchange + a wallet + the prediction market.
     expect(stdout).toContain("bybit:UNIFIED");
     expect(stdout).toContain("solana:");

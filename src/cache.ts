@@ -32,6 +32,7 @@ const DEFAULT_TTL_SEC: Record<ConnectorId, number> = {
   polymarket: 30,
   solana: 60,
   binance: 120,
+  hyperliquid: 60,
 };
 
 // Fallback TTL for any namespace not in DEFAULT_TTL_SEC (defensive — prices.ts

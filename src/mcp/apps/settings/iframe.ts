@@ -164,6 +164,10 @@ function describeMetadata(connectorId: string, meta: Record<string, unknown>): s
     const rpc = typeof meta.rpcUrl === "string" && meta.rpcUrl.length > 0 ? "premium RPC" : "public RPC";
     return `${addrs.length} address${addrs.length === 1 ? "" : "es"}, ${rpc}`;
   }
+  if (connectorId === "hyperliquid") {
+    const addr = typeof meta.address === "string" ? meta.address : "";
+    return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}, perp + spot` : "perp + spot";
+  }
   return "";
 }
 
@@ -173,7 +177,7 @@ function describeMetadata(connectorId: string, meta: Record<string, unknown>): s
 
 const SECURITY_DISCLOSURE = `<div class="disclosure">
   <strong>Security:</strong> Credentials submitted here transit Claude Desktop's process en route to your OS keychain.
-  All five connectors use READ-ONLY credentials by design (Bybit "Read" only, no Withdraw; Binance "Enable Reading" only, no Trade or Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public; Solana addresses are public on-chain identifiers).
+  All six connectors use READ-ONLY credentials by design (Bybit "Read" only, no Withdraw; Binance "Enable Reading" only, no Trade or Withdraw; Etherscan is a public-data rate-limit token; Polymarket proxy wallet is already public; Solana and Hyperliquid addresses are public on-chain identifiers — Hyperliquid needs no key or signature).
   Worst-case leak is a portfolio-read, never a fund movement.
   For the strictest path that NEVER touches Claude Desktop, use the CLI: <code>bun run setup &lt;connector&gt;</code>.
 </div>`;
@@ -188,6 +192,7 @@ async function renderAddAccount(): Promise<void> {
         <button class="btn-primary" data-connector="binance">Binance (read-only API key)</button>
         <button class="btn-primary" data-connector="metamask">MetaMask / EVM wallet</button>
         <button class="btn-primary" data-connector="solana">Solana wallet</button>
+        <button class="btn-primary" data-connector="hyperliquid">Hyperliquid (wallet only)</button>
         <button class="btn-primary" data-connector="polymarket">Polymarket (wallet only)</button>
       </div>
       <div id="connector-form"></div>
@@ -321,6 +326,27 @@ function renderConnectorForm(connector: string): void {
       solana: {
         address: data.address,
         rpcUrl: data.rpcUrl && data.rpcUrl.length > 0 ? data.rpcUrl : undefined,
+        dustThresholdUsd: data.dustThresholdUsd ? parseFloat(data.dustThresholdUsd) : undefined,
+      },
+    }));
+    return;
+  }
+  if (connector === "hyperliquid") {
+    slot.innerHTML = `
+      <h3>Hyperliquid setup</h3>
+      <p class="muted">Paste the <strong>EVM address you trade from</strong> on Hyperliquid (0x...). No API key, no signature — the data is public on-chain. Tracks your perp account equity, open positions, and spot balances.</p>
+      <form id="form-hl" class="form-grid">
+        <label>Hyperliquid address<input name="address" type="text" pattern="^0x[a-fA-F0-9]{40}$" required placeholder="0x..." autocomplete="off"></label>
+        <label>Dust threshold (USD)<input name="dustThresholdUsd" type="number" step="0.01" value="0.5" min="0">
+          <small class="muted">Hide spot tokens worth less than this. Perp account equity always shows. 0 to show everything.</small>
+        </label>
+        <button type="submit" class="btn-primary">Validate &amp; Save</button>
+      </form>
+      <div id="form-result"></div>`;
+    wireForm("form-hl", async (data) => callTool("setup_connector", {
+      connector: "hyperliquid",
+      hyperliquid: {
+        address: data.address,
         dustThresholdUsd: data.dustThresholdUsd ? parseFloat(data.dustThresholdUsd) : undefined,
       },
     }));

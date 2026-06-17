@@ -65,7 +65,7 @@ Usage:
   headless-tracker version                Print the version
   headless-tracker help                   Show this help
 
-Connectors: bybit, binance, metamask, polymarket, solana
+Connectors: bybit, binance, metamask, polymarket, solana, hyperliquid
 
 Setup examples (interactive — run in a terminal):
   headless-tracker setup bybit
@@ -74,6 +74,7 @@ Setup examples (interactive — run in a terminal):
 
 Setup examples (non-interactive — for scripts, Docker, CI; secrets via env, never argv):
   headless-tracker setup solana --address=<base58>
+  headless-tracker setup hyperliquid --address=0x...   (no key — public address only)
   headless-tracker setup polymarket --proxy-wallet=0x... --size-threshold=0.01
   HT_SETUP_ETHERSCAN_KEY=… headless-tracker setup metamask --address=0x... --chains=1,137
   HT_SETUP_API_KEY=… HT_SETUP_API_SECRET=… headless-tracker setup bybit --account-type=UNIFIED --also=FUND
@@ -962,7 +963,7 @@ async function runDemo(): Promise<void> {
   }
 
   console.log("\nConnect your own (read-only keys, runs locally on your machine):");
-  console.log("  headless-tracker setup bybit | binance | metamask | solana | polymarket");
+  console.log("  headless-tracker setup bybit | binance | metamask | solana | hyperliquid | polymarket");
   console.log("  then point Claude Desktop at it — see `headless-tracker help`.");
   console.log("\nData aggregation only — not financial advice.\n");
 }

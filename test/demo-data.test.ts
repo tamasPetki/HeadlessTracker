@@ -14,7 +14,7 @@ describe("demo dataset", () => {
   test("is a non-trivial multi-venue portfolio", () => {
     expect(DEMO_HOLDINGS.length).toBeGreaterThanOrEqual(10);
     const accounts = new Set(DEMO_HOLDINGS.map((h) => h.accountId));
-    expect(accounts.size).toBe(5); // one per connector
+    expect(accounts.size).toBe(6); // one per connector
   });
 
   test("every holding is fully priced and USD-denominated", () => {
@@ -32,7 +32,7 @@ describe("demo dataset", () => {
   test("DEMO_TOTAL_USD equals the sum of holding values", () => {
     const sum = DEMO_HOLDINGS.reduce((s, h) => s + (h.value ?? 0), 0);
     expect(DEMO_TOTAL_USD).toBeCloseTo(sum, 6);
-    expect(DEMO_TOTAL_USD).toBe(104126);
+    expect(DEMO_TOTAL_USD).toBe(116166);
   });
 
   test("includes all three asset classes (the 'how is it split' story)", () => {
