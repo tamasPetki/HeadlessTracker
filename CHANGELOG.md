@@ -2,6 +2,18 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.15 — 2026-06-17
+
+Sharpens MCP tool descriptions so AI hosts route portfolio queries more reliably. No behavior change — descriptions only.
+
+### Changed
+
+- **Tool descriptions improved for routing recall**, validated by replaying realistic user queries through a fresh model acting as the MCP host (the "test your tool descriptions with a fresh model" check this project preaches — so it was past time to run it on our own). Measured confidence on previously-ambiguous queries rose with no regression.
+  - `get_allocations` / `get_holdings`: clarified that the `cash` asset class covers stablecoins (USDC/USDT) + fiat, so "how much is in stablecoins vs crypto?" routes to the right grouping.
+  - `get_holdings`: added reciprocal pointers — Polymarket-specific questions → `get_polymarket_positions`; ranked / biggest-position views → `get_allocations`.
+  - `refresh_data`: added implicit-staleness triggers ("my balances look stale", "force an update", "my data is outdated").
+  - `list_accounts`: added wallet/address phrasings ("which wallets am I tracking", "what addresses am I tracking").
+
 ## v1.0.14 — 2026-06-14
 
 Fixes silent $0 Solana pricing and adds non-interactive setup for scripted/headless onboarding.

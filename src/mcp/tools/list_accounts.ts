@@ -14,7 +14,7 @@ export const LIST_ACCOUNTS_TOOL_NAME = "list_accounts";
 
 export const LIST_ACCOUNTS_DESCRIPTION = [
   "Lists configured PORTFOLIO TRACKER accounts (Bybit exchange / Binance exchange / MetaMask wallets / Polymarket / Solana wallets) without exposing credentials.",
-  "Use when the user asks: 'what tracker accounts are configured', 'show my portfolio accounts', 'list my exchange connections', 'which crypto exchanges are linked'.",
+  "Use when the user asks: 'what tracker accounts are configured', 'show my portfolio accounts', 'list my exchange connections', 'which crypto exchanges are linked', 'which wallets am I tracking', 'what addresses am I tracking'.",
   "Returns: id, connectorId (bybit | binance | metamask | polymarket | solana), label, createdAt, and connector-specific public metadata (e.g. chainIds and addresses for MetaMask, accountType for Bybit, address for Solana, key fingerprint for Binance).",
   "Credentials are NEVER returned — they stay in the OS keychain.",
   "DO NOT call this tool when the user means: email accounts, social media accounts, GitHub accounts, cloud accounts, OS user accounts, or any 'accounts' from a different domain or MCP server. It's specifically the headless-tracker exchange/wallet connections.",

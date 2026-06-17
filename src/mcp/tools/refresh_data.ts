@@ -13,7 +13,8 @@ export const REFRESH_DATA_TOOL_NAME = "refresh_data";
 export const REFRESH_DATA_DESCRIPTION = [
   "Invalidates the PORTFOLIO TRACKER cache (Bybit/Binance/MetaMask/Polymarket/Solana holdings + transactions) and forces a fresh fetch from upstream APIs on the next call.",
   "Use this when the user asks: 'refresh my portfolio', 'update my holdings', 'get the latest portfolio prices',",
-  "'fetch fresh portfolio data', 'check current crypto prices', or implies real-time freshness is required FOR THE TRACKER.",
+  "'fetch fresh portfolio data', 'check current crypto prices', 'my balances look stale', 'force an update',",
+  "'my data is outdated', or implies real-time freshness is required FOR THE TRACKER.",
   "",
   "Optionally scope to a single connector (bybit, binance, metamask, polymarket, solana).",
   "Without a scope, invalidates everything tracker-related.",

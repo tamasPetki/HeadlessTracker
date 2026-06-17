@@ -17,7 +17,7 @@ export const GET_ALLOCATIONS_DESCRIPTION = [
   "'what % is in crypto', 'chain breakdown', 'show my biggest position', 'concentration'.",
   "",
   "Groups available:",
-  "  - 'asset_class' (default): crypto / stock / prediction / cash",
+  "  - 'asset_class' (default): crypto / stock / prediction / cash (cash = stablecoins like USDC/USDT + fiat)",
   "  - 'connector':            bybit / metamask / polymarket",
   "  - 'account':              one row per configured account",
   "  - 'chain':                EVM chain (Ethereum / Polygon / etc.) — only meaningful for MetaMask holdings",
