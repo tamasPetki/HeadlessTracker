@@ -20,7 +20,13 @@
 
 <p align="center"><sub>↑ And the raw input: real output of <code>npx headless-tracker demo</code> — six venues, no accounts, no API keys. Then ask your AI host about it.</sub></p>
 
-The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/dashboard-trader.png" alt="The same sample portfolio rendered as a trader view by an AI host — a 30-day P&L headline with a sparkline, today's movers, and an open-leverage table of Hyperliquid perp positions (long/short) with entry, mark, liquidation price and unrealized PnL." width="720">
+</p>
+
+<p align="center"><sub>↑ <b>Same data, a different question.</b> Ask &ldquo;how are my positions doing?&rdquo; and your AI renders a <em>trader</em> view instead. There is no single dashboard — the host draws the one you ask for. <em>(Templates coming: contribute a view, not a connector.)</em></sub></p>
+
+The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026 — there is no single UI to build, your AI renders whatever view you ask for. Build the data layer; let the AI host be the renderer.
 
 **Status:** Production-ready and live on npm (version badge above). Six connectors (Bybit, Binance, MetaMask/EVM, Solana, Hyperliquid, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 428-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
 
