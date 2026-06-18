@@ -9,14 +9,20 @@
 > A **read-only** MCP server that lets your AI host (Claude Desktop, Claude Code, Cursor, ChatGPT) see your whole crypto portfolio across exchanges, on-chain wallets, and prediction markets — without ever giving it your API keys, and with no ability to trade or move funds. It reads the numbers; it can't touch the money.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/demo.png" alt="npx headless-tracker demo — a sample six-venue portfolio (Bybit, Binance, MetaMask, Solana, Hyperliquid, Polymarket) rendered in the terminal with no accounts and no API keys" width="720">
+  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/dashboard.png" alt="HeadlessTracker portfolio rendered as a dashboard by an AI host — net worth $116,166 across six venues (Bybit, Binance, MetaMask, Solana, Hyperliquid, Polymarket), with asset-class allocation, per-venue holdings, and open Hyperliquid perp positions shown as informational only." width="760">
 </p>
 
-<p align="center"><sub>↑ Real output of <code>npx headless-tracker demo</code> — five venues, no accounts, no API keys. Then ask your AI host about it.</sub></p>
+<p align="center"><sub>↑ What your AI host renders from HeadlessTracker's data — one question, six venues, one view. The server returns the numbers; the host draws the picture. <em>(Sample data; the visual is what a host renders on top of the tool output.)</em></sub></p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/demo.png" alt="npx headless-tracker demo — a sample six-venue portfolio (Bybit, Binance, MetaMask, Solana, Hyperliquid, Polymarket) rendered in the terminal with no accounts and no API keys" width="660">
+</p>
+
+<p align="center"><sub>↑ And the raw input: real output of <code>npx headless-tracker demo</code> — six venues, no accounts, no API keys. Then ask your AI host about it.</sub></p>
 
 The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate dashboards on demand from structured data. Building yet another tracker UI is wasted work in 2026. Build the data layer; let the AI host be the renderer.
 
-**Status:** Production-ready and live on npm (version badge above). Six connectors (Bybit, Binance, MetaMask/EVM, Solana, Hyperliquid, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 426-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
+**Status:** Production-ready and live on npm (version badge above). Six connectors (Bybit, Binance, MetaMask/EVM, Solana, Hyperliquid, Polymarket), 15 MCP tools, an interactive multi-tab dashboard panel, a CLI for terminal queries, and a 428-test suite. Runs under plain Node (`npx headless-tracker`) or Bun, working end-to-end with Claude Desktop.
 
 <details>
 <summary><b>Full feature list</b></summary>
@@ -30,7 +36,7 @@ The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate das
 - **Custom ERC-20 token lists**; FIFO + Average Cost on transaction history
 - **Multi-currency display** (USD/EUR/GBP/HUF); CoinGecko + Jupiter spot and historical prices
 - **Time-windowed PnL** (`--timeframe=24h|7d|30d|ytd`)
-- **377-test suite**; runs under plain Node or Bun
+- **428-test suite**; runs under plain Node or Bun
 - **Read-only & local-first:** no orders/withdrawals/transfers; 4 of 6 connectors need only a public address; secrets live in your OS keychain and never enter the model's context — see [SECURITY.md](SECURITY.md)
 
 See [ROADMAP.md](./ROADMAP.md) for what's done, what's next, and what's intentionally out of scope.
