@@ -2,6 +2,15 @@
 
 All notable changes to headless-tracker. Versions follow [SemVer](https://semver.org/).
 
+## v1.0.17 — 2026-06-18
+
+Fixes Hyperliquid P&L. Found by dogfooding v1.0.16 end-to-end through the actual tools (not just the connector in isolation).
+
+### Fixed
+
+- **`get_pnl --include-history` produced garbage for Hyperliquid accounts.** It ran spot FIFO cost-basis over perp *fills* (opens/closes of longs and shorts), which aren't spot acquisitions — so the model had no prior "buy" lot for a short and manufactured a cascade of orphan "sells" plus a meaningless realized number, while ignoring the authoritative `closedPnl` Hyperliquid already reports per fill. Now: realized PnL for a Hyperliquid account is the sum of its fills' `closedPnl` (FIFO is skipped — it doesn't apply to perps), with no orphan/unknown-sale noise.
+- **`get_pnl` now surfaces Hyperliquid unrealized PnL** from open positions' live metadata (sum of each position's `unrealizedPnl`), instead of reporting "no cost basis". The generic "holding(s) without cost basis" note is suppressed for Hyperliquid (its holdings legitimately have no avgCost), replaced by a note explaining the perp model.
+
 ## v1.0.16 — 2026-06-17
 
 Adds **Hyperliquid** as the sixth connector — read-only, address-only, no API key or signature. The most common reason people couldn't use HeadlessTracker was that it didn't track the venue where their coins actually live; Hyperliquid is one of the loudest of those gaps.

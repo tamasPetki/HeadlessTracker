@@ -6,6 +6,18 @@ This file is the **public record** of architectural and product decisions. It's 
 
 ---
 
+## 2026-06-18 — Hyperliquid P&L: realized from `closedPnl`, never spot FIFO; unrealized from live position metadata
+
+**What**: `get_pnl` treats Hyperliquid accounts specially. Realized PnL (with `include_history=true`) is the sum of each fill's `closedPnl`, and the FIFO cost-basis engine is skipped entirely for these accounts. Unrealized PnL is the sum of open perp positions' live `unrealizedPnl` (from holding metadata), not a cost-basis derivation.
+
+**Why**: Perp fills are opens/closes of leveraged positions, not spot acquisitions/disposals. Feeding them to the spot FIFO engine is categorically wrong: a short's opening fill is a "sell" with no prior "buy" lot, so FIFO manufactures an orphan cascade (in dogfooding a real account: 153 orphan events, 151 "unknown cost" sales) and a meaningless realized number, while ignoring the fact that Hyperliquid already computes the correct realized P&L per fill (`closedPnl`). Summing `closedPnl` is both correct and authoritative. Likewise, perp positions have no avgCost lot — their unrealized P&L is a live exchange figure, so we surface that directly rather than reporting "no cost basis". This was caught by dogfooding v1.0.16 through the real tool pipeline (not just the connector in isolation) — the connector was fine; the cross-tool interaction was the bug.
+
+**Alternatives considered**: (a) Tag perp fills with a neutral transaction type so FIFO ignores them — rejected, that loses the realized P&L entirely (the engine wouldn't sum `closedPnl`). (b) Build perp-aware cost-basis into the FIFO engine — rejected as over-engineering; `closedPnl` is the venue's own answer and is exact. (c) Leave spot-fill cost-basis to FIFO and only special-case perps — deferred: spot trading on Hyperliquid is a minor case, so for now spot-fill cost-basis isn't separately tracked (noted in the output).
+
+**Reversal trigger**: If users actively trade Hyperliquid *spot* and want cost-basis on those fills, split fills into perp (sum `closedPnl`) vs spot (FIFO) within the account instead of skipping FIFO wholesale.
+
+---
+
 ## 2026-06-17 — Hyperliquid perp account: report equity as net worth, positions as informational
 
 **What**: The Hyperliquid connector reports a perp account's **equity** (`marginSummary.accountValue` = collateral + unrealized PnL) as a single cash-class holding — that is the number that enters the portfolio total. Each open perp position is also emitted as its own holding (signed size, with notional / unrealized PnL / entry / liquidation / leverage in metadata), but with its **value field intentionally left undefined** so it is not summed into net worth.

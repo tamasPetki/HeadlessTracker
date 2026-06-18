@@ -22,7 +22,7 @@ afterEach(() => {
   accountStore.close();
 });
 
-function setupAccount(id: string, connectorId: "bybit" | "metamask" | "polymarket"): void {
+function setupAccount(id: string, connectorId: "bybit" | "metamask" | "polymarket" | "hyperliquid"): void {
   accountStore.upsert({ id, connectorId, label: id, createdAt: 1 });
   vault.set(connectorId, id.slice(connectorId.length + 1), { x: 1 });
 }
@@ -852,5 +852,69 @@ describe("executeGetPnl — windowDelta (timeframe-driven)", () => {
     // Concurrency limit is 3 in computeWindowDelta. Allow ≤3 to avoid being
     // brittle to scheduler micro-timing.
     expect(maxInFlight).toBeLessThanOrEqual(3);
+  });
+
+  test("Hyperliquid: realized PnL sums fills' closedPnl, NOT spot FIFO (no orphan cascade)", async () => {
+    const acct = "hyperliquid:0xabc";
+    setupAccount(acct, "hyperliquid");
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      connectorOverrides: {
+        hyperliquid: new StubConnector({
+          id: "hyperliquid",
+          holdingsResult: ok([
+            makeHolding({ accountId: acct, symbol: "USDC", assetClass: "cash", quantity: 10000, currentPrice: 1, value: 10000, metadata: { venue: "hyperliquid", kind: "perp-account-equity" } }),
+            makeHolding({ accountId: acct, symbol: "BTC", assetClass: "crypto", quantity: -2.5, value: undefined, metadata: { venue: "hyperliquid", kind: "perp-position", side: "short", unrealizedPnl: 1200 } }),
+          ]),
+          transactionsResult: ok([
+            { accountId: acct, txId: "hyperliquid:0xa:1", type: "sell", symbol: "BTC", quantity: 1, price: 64000, valueCurrency: "USD", timestamp: 1000, metadata: { venue: "hyperliquid", closedPnl: -50 } },
+            { accountId: acct, txId: "hyperliquid:0xb:2", type: "buy", symbol: "BTC", quantity: 0.5, price: 65000, valueCurrency: "USD", timestamp: 2000, metadata: { venue: "hyperliquid", closedPnl: 300 } },
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ account_id: acct, include_history: true }, orch);
+    const a = r.byAccount.find((x) => x.accountId === acct)!;
+    // Realized = sum of closedPnl (300 + -50 = 250), NOT a FIFO-derived number.
+    expect(a.realizedPnl).toBeCloseTo(250, 6);
+    // The whole point: running spot FIFO over perp fills would manufacture an
+    // orphan/unknown-sale cascade. That must NOT happen.
+    expect(a.realizedFromHistory!.orphanCount).toBe(0);
+    expect(a.realizedFromHistory!.unknownSalesCount).toBe(0);
+    expect(a.realizedFromHistory!.knownRealized).toBeCloseTo(250, 6);
+    expect(a.notes.some((n) => n.includes("closedPnl"))).toBe(true);
+    expect(a.notes.some((n) => n.toLowerCase().includes("orphan"))).toBe(false);
+  });
+
+  test("Hyperliquid: unrealized PnL summed from open positions' metadata (not 'no cost basis')", async () => {
+    const acct = "hyperliquid:0xdef";
+    setupAccount(acct, "hyperliquid");
+    const orch = new Orchestrator({
+      accountStore,
+      cache,
+      vault: vault as never,
+      connectorOverrides: {
+        hyperliquid: new StubConnector({
+          id: "hyperliquid",
+          holdingsResult: ok([
+            makeHolding({ accountId: acct, symbol: "USDC", assetClass: "cash", quantity: 5000, currentPrice: 1, value: 5000, metadata: { venue: "hyperliquid", kind: "perp-account-equity" } }),
+            makeHolding({ accountId: acct, symbol: "BTC", assetClass: "crypto", quantity: -2, value: undefined, metadata: { venue: "hyperliquid", kind: "perp-position", side: "short", unrealizedPnl: 800 } }),
+            makeHolding({ accountId: acct, symbol: "SOL", assetClass: "crypto", quantity: 100, value: undefined, metadata: { venue: "hyperliquid", kind: "perp-position", side: "long", unrealizedPnl: -150 } }),
+          ]),
+        }),
+      },
+    });
+
+    const r = await executeGetPnl({ account_id: acct }, orch);
+    const a = r.byAccount.find((x) => x.accountId === acct)!;
+    // Unrealized = sum of open positions' live unrealizedPnl (800 + -150 = 650).
+    expect(a.unrealizedPnl).toBeCloseTo(650, 6);
+    // The misleading generic "no cost basis" note must be suppressed for HL.
+    expect(a.notes.some((n) => n.includes("without cost basis"))).toBe(false);
+    // A Hyperliquid-specific note explains the model.
+    expect(a.notes.some((n) => n.toLowerCase().includes("hyperliquid"))).toBe(true);
   });
 });

@@ -205,6 +205,9 @@ function pnlForAccount(holdings: Holding[]): AccountPnl {
   let hasMetamask = false;
   let hasPolymarket = false;
   let hasBybit = false;
+  let hasHyperliquid = false;
+  let hlUnrealized = 0;          // sum of open perp positions' live unrealized PnL
+  let hlUnrealizedKnown = 0;
 
   for (const h of holdings) {
     if (h.value !== undefined) currentValue += h.value;
@@ -225,10 +228,24 @@ function pnlForAccount(holdings: Holding[]): AccountPnl {
     if (typeof meta.chainId === "number") hasMetamask = true;
     if (typeof meta.eventSlug === "string" || meta.outcome) hasPolymarket = true;
     if (typeof meta.accountType === "string" && (meta.accountType === "UNIFIED" || meta.accountType === "SPOT" || meta.accountType === "CONTRACT" || meta.accountType === "FUND")) hasBybit = true;
+    // Hyperliquid: perp positions carry authoritative live unrealized PnL in
+    // metadata (we never set avgCost for them, so the cost-basis path above is
+    // intentionally empty). Sum it for an honest unrealized number instead of
+    // reporting "no cost basis".
+    if (meta.venue === "hyperliquid") {
+      hasHyperliquid = true;
+      if (meta.kind === "perp-position" && typeof meta.unrealizedPnl === "number") {
+        hlUnrealized += meta.unrealizedPnl;
+        hlUnrealizedKnown++;
+      }
+    }
   }
 
   const unknownCostHoldings = holdings.length - costBasisKnown;
-  if (unknownCostHoldings > 0) {
+  // Suppress the generic "no cost basis" note for Hyperliquid: its holdings
+  // legitimately have no avgCost (equity + perp exposure aren't cost-basis lots),
+  // and the Hyperliquid note below explains the real model.
+  if (unknownCostHoldings > 0 && !hasHyperliquid) {
     notes.push(
       `${unknownCostHoldings} holding(s) without cost basis — unrealized P&L excludes them.`
     );
@@ -242,12 +259,27 @@ function pnlForAccount(holdings: Holding[]): AccountPnl {
   if (hasBybit) {
     notes.push("Bybit cumRealisedPnl from V5 metadata included in realizedPnl.");
   }
+  if (hasHyperliquid) {
+    notes.push(
+      "Hyperliquid: unrealized PnL is summed from open perp positions' live values; account equity (the cash holding) already reflects it. Realized PnL is null by default — pass include_history=true to sum it from fills' closedPnl (perp fills aren't spot trades, so FIFO cost-basis isn't applied)."
+    );
+  }
+
+  // Hyperliquid's unrealized PnL comes from live position metadata, not from an
+  // avgCost cost basis. Prefer it when present; otherwise fall back to the
+  // cost-basis-derived figure (only meaningful when avgCost was tracked).
+  const unrealizedPnl =
+    hlUnrealizedKnown > 0
+      ? hlUnrealized
+      : costBasisKnown > 0
+        ? currentValue - costBasis
+        : null;
 
   return {
     accountId,
     currentValue,
     costBasis: costBasisKnown > 0 ? costBasis : null,
-    unrealizedPnl: costBasisKnown > 0 ? currentValue - costBasis : null,
+    unrealizedPnl,
     realizedPnl: realizedPnl !== 0 ? realizedPnl : null,
     realizedFromHistory: null,                         // populated by caller iff include_history=true
     notes,
@@ -291,6 +323,33 @@ export async function executeGetPnl(
     }
     for (const account of byAccount) {
       const txs = byAccountTx.get(account.accountId) ?? [];
+
+      // Hyperliquid: fills are perp opens/closes (and spot swaps), NOT spot
+      // acquisitions, so FIFO cost-basis over them is meaningless — it would
+      // manufacture orphan "sells" and a nonsense realized number (the model
+      // has no prior "buy" lot for a short). Hyperliquid already computes the
+      // authoritative realized PnL per fill (closedPnl); sum that instead.
+      if (account.accountId.startsWith("hyperliquid:")) {
+        let realized = 0;
+        for (const t of txs) {
+          const cp = t.metadata?.closedPnl;
+          if (typeof cp === "number" && Number.isFinite(cp)) realized += cp;
+        }
+        account.realizedPnl = realized;
+        account.realizedFromHistory = {
+          knownRealized: realized,
+          unknownSalesCount: 0,
+          orphanCount: 0,
+        };
+        account.notes = account.notes.filter(
+          (n) => !n.includes("Realized PnL is null by default")
+        );
+        account.notes.push(
+          `Hyperliquid realizedPnl summed from ${txs.length} fill(s)' closedPnl (perp fills aren't spot acquisitions, so FIFO cost-basis is not applied; spot-fill cost-basis is a future addition).`
+        );
+        continue;
+      }
+
       const cb = computeCostBasisWithMethod(txs, method);
       account.realizedFromHistory = {
         knownRealized: cb.totals.realizedKnown,
