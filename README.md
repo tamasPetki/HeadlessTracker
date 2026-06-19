@@ -35,7 +35,7 @@ The thesis: AI hosts (Claude Desktop, Claude Code, Cursor, ChatGPT) generate das
 
 - **6 connectors:** Bybit, Binance Spot+Futures, MetaMask multi-chain + multi-wallet, Solana multi-wallet, Hyperliquid (perp + spot, address-only), Polymarket
 - **15 MCP tools:** 6 data + 7 account/token management + 2 MCP App panels
-- **3 MCP prompts:** `portfolio-dashboard`, `weekly-review`, `risk-check`
+- **3 MCP prompts (views):** `portfolio-dashboard`, `weekly-review`, `risk-check` — see [TEMPLATES.md](TEMPLATES.md), and [contribute a view](TEMPLATES.md#contribute-a-view--not-a-connector)
 - **Interactive dashboard MCP App:** 3 tabs (Portfolio / Weekly / Risk) with donut + bar charts, currency switcher, refresh button
 - **Live Settings MCP App** for setup and admin
 - **CLI portfolio queries:** `show holdings / pnl / transactions` (no Claude required)

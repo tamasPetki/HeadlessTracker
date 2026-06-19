@@ -1,6 +1,6 @@
 # Contributing to headless-tracker
 
-Thanks for your interest. This project follows a simple principle: **build the data layer, let the AI host be the renderer**. Contributions that add connectors, improve data quality, or fix bugs fit naturally. New UI surfaces don't — the MCP host handles rendering.
+Thanks for your interest. This project follows a simple principle: **build the data layer, let the AI host be the renderer**. Contributions that add connectors, improve data quality, fix bugs, or propose **views** (saved ways to ask your AI to render the portfolio — see [TEMPLATES.md](TEMPLATES.md)) fit naturally. New UI surfaces don't — the MCP host handles rendering.
 
 ## Quick orientation
 
@@ -10,7 +10,7 @@ Thanks for your interest. This project follows a simple principle: **build the d
 | `src/mcp/` | MCP server, tools, prompts, and MCP Apps (dashboard, settings). |
 | `src/cost_basis.ts` | FIFO cost basis engine. |
 | `src/orchestrator.ts` | Aggregates across connectors, applies pricing, produces the unified schema. |
-| `test/` | 317 tests. Bun test runner, `--timeout=15000`. |
+| `test/` | 428 tests. Bun test runner, `--timeout=15000`. |
 | `ROADMAP.md` | What's done, what's next, what's intentionally out of scope. Read before opening a feature request. |
 
 ## Setup
@@ -51,6 +51,16 @@ bun run build:apps
 6. Update `ROADMAP.md` — add the connector to the Done section with a one-line note.
 
 **Read-only credentials only.** Every connector must request the minimum scope the exchange allows (e.g. Bybit "Read", Binance "Enable Reading"). Withdraw / trade permissions are never needed and must not be requested.
+
+## Contributing a view (template)
+
+A **view** is a saved way of asking your AI to render the portfolio — it ships as an MCP prompt that calls existing tools, not as new rendering code. It's the lowest-friction way to contribute: you describe it, the maintainer builds it.
+
+1. Open a [**View idea**](.github/ISSUE_TEMPLATE/view_idea.md) issue: the question it answers, the shape of the answer, and which existing tools it would call.
+2. The maintainer implements it as a prompt under `src/mcp/prompts/`, wires it into `src/mcp/server.ts`, adds it to [TEMPLATES.md](TEMPLATES.md), and credits you.
+3. **Concepts only.** Submitted text/code is never shipped verbatim — the prompt is written from scratch, uses existing tools only, makes no external calls, and meets the same honesty + not-financial-advice bar as everything else, so every installed view is safe.
+
+See [TEMPLATES.md](TEMPLATES.md) for the built-in views and the full pitch.
 
 ## Submitting a PR
 
