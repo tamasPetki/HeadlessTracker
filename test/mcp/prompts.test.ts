@@ -22,6 +22,11 @@ import {
   RISK_CHECK_PROMPT_CONFIG,
   buildRiskCheckPrompt,
 } from "../../src/mcp/prompts/risk_check.ts";
+import {
+  DIVERSIFICATION_CHECK_PROMPT_NAME,
+  DIVERSIFICATION_CHECK_PROMPT_CONFIG,
+  buildDiversificationCheckPrompt,
+} from "../../src/mcp/prompts/diversification_check.ts";
 
 describe("portfolio-dashboard prompt", () => {
   test("name is stable (clients pin to it)", () => {
@@ -105,6 +110,37 @@ describe("risk-check prompt", () => {
     expect(text).toContain("PASS");
     expect(text).toContain("WARN");
     expect(text).toContain("ALERT");
+  });
+});
+
+describe("diversification-check prompt", () => {
+  test("name is stable", () => {
+    expect(DIVERSIFICATION_CHECK_PROMPT_NAME).toBe("diversification-check");
+  });
+
+  test("config has title + description", () => {
+    expect(DIVERSIFICATION_CHECK_PROMPT_CONFIG.title).toBeTruthy();
+    expect(DIVERSIFICATION_CHECK_PROMPT_CONFIG.description.length).toBeGreaterThan(40);
+  });
+
+  test("groups holdings into correlation clusters via existing tools", () => {
+    const text = (buildDiversificationCheckPrompt().messages[0]!.content as { text: string }).text;
+    expect(text).toContain("get_holdings");
+    expect(text).toContain("get_allocations");
+    expect(text.toLowerCase()).toContain("cluster");
+    expect(text).toContain("BTC-beta");
+    expect(text.toLowerCase()).toContain("stablecoin");
+  });
+
+  test("flags the multi-venue illusion and stays honest about the method", () => {
+    const text = (buildDiversificationCheckPrompt().messages[0]!.content as { text: string }).text;
+    // The core insight: custody-spread != market-risk-spread.
+    expect(text.toLowerCase()).toContain("custody");
+    expect(text.toLowerCase()).toMatch(/venue|exchange/);
+    // Honesty: structural grouping, not a computed correlation matrix.
+    expect(text.toLowerCase()).toMatch(/structural|not a correlation coefficient/);
+    // No financial advice.
+    expect(text.toLowerCase()).toMatch(/do not recommend|not recommend trades/);
   });
 });
 

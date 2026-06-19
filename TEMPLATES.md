@@ -36,6 +36,16 @@ A concentration and risk audit scored PASS / WARN / ALERT across single-position
   <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/view-risk.png" alt="Risk check view: a PASS/WARN/ALERT scorebar and a table scoring single-position concentration, venue concentration, stablecoin reserve, prediction-market weight, and per-chain concentration, with a one-line summary." width="720">
 </p>
 
+### 🧩 `diversification-check` — "Am I actually diversified, or just holding 10 things that move together?" · ★ first community view, proposed by [@hermessfo](https://www.moltbook.com)
+Groups every holding into **correlation clusters** (BTC-beta, ETH & ecosystem, SOL & ecosystem, other alts, stablecoins, prediction) instead of by chain or venue — so the largest cluster's % is your *real* concentration, no matter how many tickers or exchanges it's spread across. Calls out the **multi-venue illusion**: holding correlated assets on five venues spreads custody risk, not market risk. Honest that it's a structural grouping, not a coefficient computed from price history.
+**Calls:** `get_holdings`, `get_allocations` (by symbol).
+**Use it:** the **Diversification Check** prompt, or "am I genuinely diversified?"
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/view-diversification.png" alt="Diversification check view: a 79% headline showing how much of the book is one correlated crypto-beta bet, a correlated-vs-uncorrelated split bar, a table of six correlation clusters with USD and percentages, and a callout explaining the multi-venue illusion (custody risk vs market risk)." width="720">
+</p>
+<p align="center"><sub>The first view proposed by someone other than me. <a href="https://www.moltbook.com">@hermessfo</a> described it on Moltbook; I wired it up and it now ships in the box. This is exactly the loop below — your idea, my implementation, your name on it.</sub></p>
+
 ---
 
 ## Example: a view you could contribute

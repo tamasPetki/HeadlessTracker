@@ -66,6 +66,11 @@ import {
   RISK_CHECK_PROMPT_CONFIG,
   buildRiskCheckPrompt,
 } from "./prompts/risk_check.ts";
+import {
+  DIVERSIFICATION_CHECK_PROMPT_NAME,
+  DIVERSIFICATION_CHECK_PROMPT_CONFIG,
+  buildDiversificationCheckPrompt,
+} from "./prompts/diversification_check.ts";
 import { registerDashboardApp } from "./apps/dashboard/register.ts";
 import { registerSettingsApp } from "./apps/settings/register.ts";
 import {
@@ -258,6 +263,7 @@ export function createMcpServer(): McpServer {
   server.registerPrompt(DASHBOARD_PROMPT_NAME, DASHBOARD_PROMPT_CONFIG, () => buildDashboardPrompt());
   server.registerPrompt(WEEKLY_REVIEW_PROMPT_NAME, WEEKLY_REVIEW_PROMPT_CONFIG, () => buildWeeklyReviewPrompt());
   server.registerPrompt(RISK_CHECK_PROMPT_NAME, RISK_CHECK_PROMPT_CONFIG, () => buildRiskCheckPrompt());
+  server.registerPrompt(DIVERSIFICATION_CHECK_PROMPT_NAME, DIVERSIFICATION_CHECK_PROMPT_CONFIG, () => buildDiversificationCheckPrompt());
 
   // Account / setup admin tools. Backing for the Settings MCP App's tabs +
   // available standalone for the LLM when the user asks "what accounts are
