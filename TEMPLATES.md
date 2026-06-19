@@ -23,12 +23,18 @@ A 7-day review: window delta (your current basket valued at 7-day-old prices vs 
 **Calls:** `get_pnl` (`timeframe: 7d`), `get_holdings`, `get_transactions` (`since: 7d`).
 **Use it:** the **Weekly Review** prompt, or "give me a weekly portfolio review."
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/view-weekly.png" alt="Weekly review view: a 7-day window delta headline with an honest caveat, biggest movers (gainers and losers), trades this week grouped by venue, and one plain-English observation." width="720">
+</p>
+
 ### 🛡️ `risk-check` — "Is anything structurally risky here?"
 A concentration and risk audit scored PASS / WARN / ALERT across single-position dominance, venue concentration, stablecoin reserve, prediction-market overweight, and per-chain concentration.
 **Calls:** `get_holdings`, `get_allocations` (by symbol, by asset class, by connector).
 **Use it:** the **Risk Check** prompt, or "do a risk check on my portfolio."
 
-> _Screenshots for `weekly-review` and `risk-check` are being added — the views themselves ship today; the gallery imagery is filling in incrementally._
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tamasPetki/HeadlessTracker/main/docs/view-risk.png" alt="Risk check view: a PASS/WARN/ALERT scorebar and a table scoring single-position concentration, venue concentration, stablecoin reserve, prediction-market weight, and per-chain concentration, with a one-line summary." width="720">
+</p>
 
 ---
 
