@@ -13,8 +13,8 @@ export const GET_ALLOCATIONS_TOOL_NAME = "get_allocations";
 
 export const GET_ALLOCATIONS_DESCRIPTION = [
   "Returns portfolio allocation breakdown — current USD value grouped by a chosen dimension.",
-  "Use this when the user asks: 'how is my portfolio split', 'allocation breakdown',",
-  "'what % is in crypto', 'chain breakdown', 'show my biggest position', 'concentration'.",
+  "Use this whenever the user asks how their money is DIVIDED or COMPOSED — any 'how much is in X vs Y', percentage, or share-of-total question, even when phrased as 'how much do I have in...'.",
+  "Examples: 'how is my portfolio split', 'allocation breakdown', 'what % is in crypto', 'how much of my money is in stablecoins vs crypto', 'stablecoins vs crypto', 'what percentage is in stablecoins', 'how exposed am I to volatile coins vs stable', 'chain breakdown', 'show my biggest position', 'concentration'.",
   "",
   "Groups available:",
   "  - 'asset_class' (default): crypto / stock / prediction / cash (cash = stablecoins like USDC/USDT + fiat)",

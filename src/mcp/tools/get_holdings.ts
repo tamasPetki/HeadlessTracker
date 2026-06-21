@@ -26,7 +26,7 @@ export const GET_HOLDINGS_DESCRIPTION = [
   "'what's my balance', 'show my holdings', 'how much BTC do I have', or wants any snapshot",
   "of crypto/stock/prediction-market positions.",
   "For Polymarket-specific questions (which markets, outcomes, resolution or redeemable status),",
-  "prefer get_polymarket_positions. For a ranked split / biggest positions, prefer get_allocations.",
+  "prefer get_polymarket_positions. This tool is the flat LIST of what you own. For how that value is DIVIDED — ranked splits, percentages, concentration, or any 'how much is in X vs Y' / asset-class composition question (e.g. stablecoins vs crypto), prefer get_allocations, even if the user says 'how much'.",
   "",
   "Each holding includes: symbol, asset class (crypto / stock / prediction / cash), quantity,",
   "current price, USD value, and connector-specific metadata (e.g. chain for EVM, market title",
